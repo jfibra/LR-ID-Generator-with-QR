@@ -17,6 +17,7 @@ export default function IdGenerator() {
   const [editableName, setEditableName] = useState<string>("")
   const [isImageSelected, setIsImageSelected] = useState(false) // New state for image selection
   const [isFront, setIsFront] = useState(true) // New state to track which side is being displayed
+  const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
 
   // Calculate expiry date (6 months from now)
   const getExpiryDate = () => {
@@ -60,6 +61,37 @@ export default function IdGenerator() {
   const backCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const [downloadQrCanvas, setDownloadQrCanvas] = useState<HTMLCanvasElement | null>(null)
 
+  // Function to log ID generation activities
+  const logIdGeneration = useCallback(
+    async (action: "access" | "front_download" | "back_download") => {
+      if (!memberData) return
+
+      try {
+        await fetch("/api/log-id-generation", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            memberId: memberData.memberid,
+            email: memberData.email,
+            firstName: memberData.fn,
+            middleName: memberData.mn,
+            lastName: memberData.ln,
+            completeName: memberData.completename,
+            memberType: memberData.membertype,
+            status: memberData.status,
+            sessionId,
+            action,
+          }),
+        })
+      } catch (error) {
+        console.error("Failed to log ID generation:", error)
+      }
+    },
+    [memberData, sessionId],
+  )
+
   useEffect(() => {
     // Retrieve the data from sessionStorage
     const storedData = sessionStorage.getItem("memberData")
@@ -68,7 +100,15 @@ export default function IdGenerator() {
       try {
         const parsedData = JSON.parse(storedData)
         setMemberData(parsedData)
-        setEditableName(parsedData.completename || `${parsedData.fn} ${parsedData.mn || ""} ${parsedData.ln}`)
+
+        // Fix the name display - only use first name and last name
+        const displayName = `${parsedData.fn} ${parsedData.ln}`.trim()
+        setEditableName(displayName)
+
+        // Log the access to ID generator
+        setTimeout(() => {
+          logIdGeneration("access")
+        }, 1000)
       } catch (error) {
         console.error("Error parsing member data:", error)
       }
@@ -78,7 +118,7 @@ export default function IdGenerator() {
     }
 
     setLoading(false)
-  }, [router])
+  }, [router, logIdGeneration])
 
   const handleSettingsChange = useCallback((newSettings: IdSettingsType) => {
     setSettings((prev) => ({
@@ -140,6 +180,9 @@ export default function IdGenerator() {
   }, [])
 
   const handleDownload = async (isFront: boolean) => {
+    // Log the download attempt
+    await logIdGeneration(isFront ? "front_download" : "back_download")
+
     // Create a temporary canvas for high-resolution export
     const tempCanvas = document.createElement("canvas")
     const tempCtx = tempCanvas.getContext("2d")
