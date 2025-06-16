@@ -14,7 +14,7 @@ export async function POST(request: Request) {
       lastName,
       completeName,
       memberType, // We'll receive this but not send it to Laravel
-      status,
+      status, // We'll receive this but not send it to Laravel
       sessionId,
       action, // 'access', 'front_download', 'back_download'
     } = body
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const userAgent = headersList.get("user-agent") || ""
     const ipAddress = headersList.get("x-forwarded-for") || headersList.get("x-real-ip") || "unknown"
 
-    // Prepare data for Laravel API - removed member_type field
+    // Prepare data for Laravel API - removed member_type and status fields
     const logData = {
       member_id: memberId,
       email: email,
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       middle_name: middleName,
       last_name: lastName,
       // member_type: memberType, // Removed this field
-      status: status,
+      // status: status, // Removed this field
       user_agent: userAgent,
       ip_address: ipAddress,
       session_id: sessionId,
