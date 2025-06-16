@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import Image from "next/image" // This imports the Next.js Image component
+import Image from "next/image"
 import type { MemberData } from "@/types/api-types"
 import IdSettings from "@/components/id-settings"
 import type { IdSettings as IdSettingsType } from "@/components/id-settings"
@@ -15,12 +15,11 @@ export default function IdGenerator() {
   const [loading, setLoading] = useState(true)
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null)
   const [editableName, setEditableName] = useState<string>("")
-  const [isImageSelected, setIsImageSelected] = useState(false) // New state for image selection
-  const [isFront, setIsFront] = useState(true) // New state to track which side is being displayed
+  const [isImageSelected, setIsImageSelected] = useState(false)
+  const [isFront, setIsFront] = useState(true)
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
-  const [hasLoggedAccess, setHasLoggedAccess] = useState(false) // Track if we've already logged access
+  const [hasLoggedAccess, setHasLoggedAccess] = useState(false)
 
-  // Calculate expiry date (6 months from now)
   const getExpiryDate = () => {
     const now = new Date()
     const expiry = new Date(now.getFullYear(), now.getMonth() + 6, now.getDate())
@@ -31,7 +30,6 @@ export default function IdGenerator() {
     })
   }
 
-  // Updated default settings as requested
   const [settings, setSettings] = useState<IdSettingsType>({
     position: "Salesperson",
     namePosition: { x: 525, y: 835 },
@@ -40,29 +38,28 @@ export default function IdGenerator() {
     nameAlign: "center",
     memberIdPosition: { x: 352, y: 1435 },
     memberIdFont: "45px Arial",
-    positionPosition: { x: 200, y: 510 }, // Not used for text on canvas
-    positionFont: "16px Arial", // Not used for text on canvas
-    positionWidth: 250, // Not used for text on canvas
-    positionAlign: "center", // Not used for text on canvas
+    positionPosition: { x: 200, y: 510 },
+    positionFont: "16px Arial",
+    positionWidth: 250,
+    positionAlign: "center",
     uploadedImagePosition: { x: 150, y: 200 },
     uploadedImageSize: { width: 200, height: 200 },
     expiryDate: getExpiryDate(),
     expiryPosition: { x: 515, y: 1448 },
     expiryFont: "50px Arial",
-    qrCodePosition: { x: 280, y: 865 }, // Updated default position
-    qrCodeSize: { width: 500, height: 500 }, // Updated default size
-    qrCodeErrorCorrection: "M", // Updated to Medium
-    qrCodeMargin: 4, // Default Margin
-    qrCodeModuleShape: "dots", // Updated to dots
-    qrCodeEyeShape: "circle", // Updated to circle
-    qrCodeCornerRadius: 10, // Default corner radius for circle eyes
+    qrCodePosition: { x: 280, y: 865 },
+    qrCodeSize: { width: 500, height: 500 },
+    qrCodeErrorCorrection: "M",
+    qrCodeMargin: 4,
+    qrCodeModuleShape: "dots",
+    qrCodeEyeShape: "circle",
+    qrCodeCornerRadius: 10,
   })
 
   const frontCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const backCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const [downloadQrCanvas, setDownloadQrCanvas] = useState<HTMLCanvasElement | null>(null)
 
-  // Function to log ID generation activities
   const logIdGeneration = useCallback(
     async (action: "access" | "front_download" | "back_download") => {
       if (!memberData) return
@@ -94,7 +91,6 @@ export default function IdGenerator() {
   )
 
   useEffect(() => {
-    // Retrieve the data from sessionStorage
     const storedData = sessionStorage.getItem("memberData")
 
     if (storedData) {
@@ -102,14 +98,11 @@ export default function IdGenerator() {
         const parsedData = JSON.parse(storedData)
         setMemberData(parsedData)
 
-        // Fix the name display - only use first name and last name
         const displayName = `${parsedData.fn} ${parsedData.ln}`.trim()
         setEditableName(displayName)
 
-        // Log the access to ID generator only once
         if (!hasLoggedAccess) {
           setHasLoggedAccess(true)
-          // Use setTimeout to avoid blocking the render
           setTimeout(() => {
             logIdGeneration("access")
           }, 100)
@@ -118,12 +111,11 @@ export default function IdGenerator() {
         console.error("Error parsing member data:", error)
       }
     } else {
-      // If no data is found, redirect back to the home page
       router.push("/")
     }
 
     setLoading(false)
-  }, [router]) // Removed logIdGeneration from dependencies to prevent re-renders
+  }, [router])
 
   const handleSettingsChange = useCallback((newSettings: IdSettingsType) => {
     setSettings((prev) => ({
@@ -133,18 +125,18 @@ export default function IdGenerator() {
       expiryDate: newSettings.expiryDate,
       qrCodePosition: newSettings.qrCodePosition,
       qrCodeSize: newSettings.qrCodeSize,
-      qrCodeErrorCorrection: newSettings.qrCodeErrorCorrection, // Update new prop
-      qrCodeMargin: newSettings.qrCodeMargin, // Update new prop
-      qrCodeModuleShape: newSettings.qrCodeModuleShape, // Add this line
-      qrCodeEyeShape: newSettings.qrCodeEyeShape, // Add this line
-      qrCodeCornerRadius: newSettings.qrCodeCornerRadius, // Add this line
+      qrCodeErrorCorrection: newSettings.qrCodeErrorCorrection,
+      qrCodeMargin: newSettings.qrCodeMargin,
+      qrCodeModuleShape: newSettings.qrCodeModuleShape,
+      qrCodeEyeShape: newSettings.qrCodeEyeShape,
+      qrCodeCornerRadius: newSettings.qrCodeCornerRadius,
     }))
   }, [])
 
   const handleImageUpload = useCallback((url: string | null) => {
     setUploadedImageUrl(url)
     if (url) {
-      setIsImageSelected(true) // Automatically select image on upload
+      setIsImageSelected(true)
     } else {
       setIsImageSelected(false)
     }
@@ -152,7 +144,6 @@ export default function IdGenerator() {
 
   const handleNameChange = useCallback(
     (name: string) => {
-      // Only update editableName if the input is enabled
       const originalName = memberData?.completename || ""
       if (originalName.includes("&") || originalName.includes("And") || originalName.includes("and")) {
         setEditableName(name)
@@ -179,31 +170,26 @@ export default function IdGenerator() {
     setIsImageSelected(selected)
   }, [])
 
-  // Callback to receive the QR code canvas for download
   const handleDownloadQRCanvasReady = useCallback((canvas: HTMLCanvasElement) => {
     setDownloadQrCanvas(canvas)
   }, [])
 
   const handleDownload = async (isFront: boolean) => {
-    // Log the download attempt
     logIdGeneration(isFront ? "front_download" : "back_download")
 
-    // Create a temporary canvas for high-resolution export
     const tempCanvas = document.createElement("canvas")
     const tempCtx = tempCanvas.getContext("2d")
     if (!tempCtx || !memberData) return
 
-    const dpr = window.devicePixelRatio || 1 // Get DPR for download canvas as well
+    const dpr = window.devicePixelRatio || 1
 
-    // Set high resolution for export (actual ID dimensions, scaled by DPR)
     const exportWidth = 1050
     const exportHeight = 1650
-    tempCanvas.width = exportWidth * dpr // Scale canvas drawing buffer
-    tempCanvas.height = exportHeight * dpr // Scale canvas drawing buffer
+    tempCanvas.width = exportWidth * dpr
+    tempCanvas.height = exportHeight * dpr
 
-    tempCtx.scale(dpr, dpr) // Apply DPR scaling to context
+    tempCtx.scale(dpr, dpr)
 
-    // Function to calculate font size that fits within width limit (duplicated for download context)
     const getFittingFontSize = (
       ctx: CanvasRenderingContext2D,
       text: string,
@@ -222,28 +208,25 @@ export default function IdGenerator() {
     }
 
     try {
-      // Load uploaded image first (if available and front)
       let uploadedImg: HTMLImageElement | null = null
       if (uploadedImageUrl && isFront) {
-        uploadedImg = new window.Image() // Use window.Image to avoid conflict with Next.js Image component
+        uploadedImg = new window.Image()
         uploadedImg.crossOrigin = "anonymous"
         uploadedImg.src = uploadedImageUrl
         await new Promise((resolve) => {
           uploadedImg!.onload = resolve
-          uploadedImg!.onerror = resolve // Resolve even on error to prevent hanging
+          uploadedImg!.onerror = resolve
         })
       }
 
-      // Load ID background
-      const idImage = new window.Image() // Use window.Image to avoid conflict with Next.js Image component
+      const idImage = new window.Image()
       idImage.crossOrigin = "anonymous"
       idImage.src = isFront ? "/images/front-id.png" : "/images/back-id.png"
       await new Promise((resolve) => {
         idImage.onload = resolve
-        idImage.onerror = resolve // Resolve even on error to prevent hanging
+        idImage.onerror = resolve
       })
 
-      // Draw uploaded image behind background (if front)
       if (uploadedImg && isFront) {
         tempCtx.drawImage(
           uploadedImg,
@@ -254,12 +237,9 @@ export default function IdGenerator() {
         )
       }
 
-      // Draw ID background
       tempCtx.drawImage(idImage, 0, 0, exportWidth, exportHeight)
 
-      // Draw text elements
       if (isFront) {
-        // Name (bold, auto-fitting) - use settings position
         const baseNameFontSize = Number.parseInt(settings.nameFont)
         const fittingNameFontSize = getFittingFontSize(
           tempCtx,
@@ -273,14 +253,12 @@ export default function IdGenerator() {
         tempCtx.textAlign = settings.nameAlign
         tempCtx.fillText(editableName, settings.namePosition.x, settings.namePosition.y)
 
-        // Member ID - use settings position and font, make bold
         const baseMemberIdFontSize = Number.parseInt(settings.memberIdFont)
         tempCtx.font = `bold ${baseMemberIdFontSize}px Arial`
         tempCtx.fillStyle = "#003b64"
         tempCtx.textAlign = "left"
         tempCtx.fillText(memberData.memberid.toString(), settings.memberIdPosition.x, settings.memberIdPosition.y)
 
-        // Draw QR Code using the same method as canvas preview
         if (downloadQrCanvas) {
           tempCtx.drawImage(
             downloadQrCanvas,
@@ -293,7 +271,6 @@ export default function IdGenerator() {
           console.error("QR code canvas not ready for download.")
         }
       } else {
-        // Back ID - expiry date - use settings position and font, make bold
         const baseExpiryFontSize = Number.parseInt(settings.expiryFont)
         tempCtx.font = `bold ${baseExpiryFontSize}px Arial`
         tempCtx.fillStyle = "#003b64"
@@ -301,7 +278,6 @@ export default function IdGenerator() {
         tempCtx.fillText(settings.expiryDate, settings.expiryPosition.x, settings.expiryPosition.y)
       }
 
-      // Create download link
       const link = document.createElement("a")
       link.download = `lr-id-${memberData.memberid}-${isFront ? "front" : "back"}.png`
       link.href = tempCanvas.toDataURL("image/png", 1.0)
@@ -314,8 +290,6 @@ export default function IdGenerator() {
     }
   }
 
-  // These variables are now safely defined after memberData is guaranteed to be non-null
-  // or use optional chaining for initial render.
   const qrCodeContent = memberData?.email ? `https://leuteriorealty.com/business-card?email=${memberData.email}` : ""
   const isNameInputEditable =
     memberData?.completename?.includes("&") ||
@@ -325,8 +299,8 @@ export default function IdGenerator() {
 
   const CANVAS_WIDTH = 1050
   const CANVAS_HEIGHT = 1650
-  const [isLoading, setIsLoading] = useState(false) // This isLoading is for canvas drawing, not initial page load
-  const canvasRef = useRef<HTMLCanvasElement>(null) // This is not used in this file, but kept for consistency
+  const [isLoading, setIsLoading] = useState(false)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const [qrCodeCanvas, setQrCodeCanvas] = useState<HTMLCanvasElement | null>(null)
 
   const [qrCodeSize, setQrCodeSize] = useState(settings.qrCodeSize)
@@ -349,7 +323,6 @@ export default function IdGenerator() {
     setQrCodeCanvas(canvas)
   }, [])
 
-  // Show loading spinner if data is still being fetched or parsed
   if (loading || !memberData) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -374,7 +347,6 @@ export default function IdGenerator() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
       <header className="bg-white shadow-sm">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center">
@@ -396,10 +368,8 @@ export default function IdGenerator() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="container mx-auto px-4 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Sidebar */}
           <div className="lg:col-span-1">
             <IdSettings
               memberData={memberData}
@@ -408,23 +378,22 @@ export default function IdGenerator() {
               onImageUpload={handleImageUpload}
               editableName={editableName}
               onNameChange={handleNameChange}
-              isNameInputEditable={isNameInputEditable} // Pass new prop
+              isNameInputEditable={isNameInputEditable}
+              uploadedImagePosition={settings.uploadedImagePosition} // Pass current position
+              onImagePositionChange={handleImagePositionChange} // Pass position change handler
             />
           </div>
 
-          {/* Canvas Area */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-lg shadow-md p-6">
               <h2 className="text-xl font-semibold mb-4">ID Preview</h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Front ID */}
                 <div className="flex flex-col">
                   <h3 className="text-lg font-medium mb-3 text-center">Front</h3>
                   <div className="bg-black p-4 rounded-lg flex-1 flex items-center justify-center">
                     <div className="w-full">
                       <div className="relative">
-                        {/* IdCanvas component for rendering the ID */}
                         <IdCanvas
                           memberData={memberData}
                           position={settings.position}
@@ -483,13 +452,11 @@ export default function IdGenerator() {
                   </button>
                 </div>
 
-                {/* Back ID */}
                 <div className="flex flex-col">
                   <h3 className="text-lg font-medium mb-3 text-center">Back</h3>
                   <div className="bg-black p-4 rounded-lg flex-1 flex items-center justify-center">
                     <div className="w-full">
                       <div className="relative">
-                        {/* IdCanvas component for rendering the ID */}
                         <IdCanvas
                           memberData={memberData}
                           position={settings.position}
@@ -552,8 +519,9 @@ export default function IdGenerator() {
               <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
                 <h3 className="text-lg font-medium mb-2">Interactive ID Editor</h3>
                 <p className="text-gray-600 text-sm mb-2">
-                  <strong>Image Controls:</strong> Upload an image, click to select, drag to move, click outside to
-                  deselect.
+                  <strong>Image Controls:</strong> Upload an image, then use{" "}
+                  {window.innerWidth <= 1024 ? "arrow controls in sidebar" : "click and drag on canvas"} to move the
+                  image.
                 </p>
                 <p className="text-gray-600 text-sm">
                   <strong>Text Positioning:</strong> Text positions and font sizes are now fixed for consistency. Only
@@ -565,7 +533,6 @@ export default function IdGenerator() {
         </div>
       </main>
 
-      {/* Hidden QR Code Renderer for Download - uses the same library as canvas preview */}
       {qrCodeContent && (
         <QRCodeRenderer
           value={qrCodeContent}
