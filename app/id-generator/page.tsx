@@ -6,8 +6,8 @@ import Image from "next/image" // This imports the Next.js Image component
 import type { MemberData } from "@/types/api-types"
 import IdSettings from "@/components/id-settings"
 import type { IdSettings as IdSettingsType } from "@/components/id-settings"
-import QRCode from "qrcode" // Import QRCode library
 import IdCanvas from "@/components/id-canvas"
+import QRCodeRenderer from "@/components/qr-code-renderer"
 
 export default function IdGenerator() {
   const router = useRouter()
@@ -58,6 +58,7 @@ export default function IdGenerator() {
 
   const frontCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const backCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [downloadQrCanvas, setDownloadQrCanvas] = useState<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
     // Retrieve the data from sessionStorage
@@ -133,81 +134,10 @@ export default function IdGenerator() {
     setIsImageSelected(selected)
   }, [])
 
-  // Fixed helper function to render QR code to a temporary canvas using the standard qrcode library
-  const renderQrCodeToCanvas = async (
-    qrCodeContent: string,
-    qrCodeSettings: Pick<
-      IdSettingsType,
-      | "qrCodeSize"
-      | "qrCodeErrorCorrection"
-      | "qrCodeMargin"
-      | "qrCodeModuleShape"
-      | "qrCodeEyeShape"
-      | "qrCodeCornerRadius"
-    >,
-  ): Promise<HTMLCanvasElement | null> => {
-    try {
-      const tempCanvas = document.createElement("canvas")
-
-      // Use the standard qrcode library to generate the QR code
-      await QRCode.toCanvas(tempCanvas, qrCodeContent, {
-        errorCorrectionLevel: qrCodeSettings.qrCodeErrorCorrection,
-        margin: qrCodeSettings.qrCodeMargin,
-        color: {
-          dark: "#003b64",
-          light: "#FFFFFF00", // Transparent background
-        },
-        width: qrCodeSettings.qrCodeSize.width,
-      })
-
-      // If module shape is dots, we need to manually convert the squares to dots
-      if (qrCodeSettings.qrCodeModuleShape === "dots") {
-        const ctx = tempCanvas.getContext("2d")
-        if (!ctx) return tempCanvas
-
-        // Get the original image data
-        const originalImageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height)
-        const data = originalImageData.data
-
-        // Clear the canvas
-        ctx.clearRect(0, 0, tempCanvas.width, tempCanvas.height)
-
-        // Simple approach: scan the image and replace dark squares with dots
-        // Estimate module size based on canvas width and typical QR code sizes
-        const estimatedModules = 25 // Most QR codes are around 25x25 modules
-        const moduleSize = Math.floor(tempCanvas.width / estimatedModules)
-        const dotRadius = Math.max(2, moduleSize * 0.4)
-
-        ctx.fillStyle = "#003b64"
-
-        // Scan through the image in a grid pattern
-        for (let y = 0; y < tempCanvas.height; y += Math.max(1, Math.floor(moduleSize / 2))) {
-          for (let x = 0; x < tempCanvas.width; x += Math.max(1, Math.floor(moduleSize / 2))) {
-            const pixelIndex = (y * tempCanvas.width + x) * 4
-
-            if (pixelIndex < data.length) {
-              const red = data[pixelIndex]
-              const green = data[pixelIndex + 1]
-              const blue = data[pixelIndex + 2]
-              const alpha = data[pixelIndex + 3]
-
-              // If this pixel is dark (part of QR code)
-              if (red < 128 && green < 128 && blue < 128 && alpha > 128) {
-                ctx.beginPath()
-                ctx.arc(x, y, dotRadius, 0, 2 * Math.PI)
-                ctx.fill()
-              }
-            }
-          }
-        }
-      }
-
-      return tempCanvas
-    } catch (error) {
-      console.error("Error generating QR code canvas:", error)
-      return null
-    }
-  }
+  // Callback to receive the QR code canvas for download
+  const handleDownloadQRCanvasReady = useCallback((canvas: HTMLCanvasElement) => {
+    setDownloadQrCanvas(canvas)
+  }, [])
 
   const handleDownload = async (isFront: boolean) => {
     // Create a temporary canvas for high-resolution export
@@ -302,22 +232,17 @@ export default function IdGenerator() {
         tempCtx.textAlign = "left"
         tempCtx.fillText(memberData.memberid.toString(), settings.memberIdPosition.x, settings.memberIdPosition.y)
 
-        // Draw QR Code for download using the fixed helper function
-        if (memberData.email) {
-          const qrCodeContent = `https://leuteriorealty.com/business-card?email=${memberData.email}`
-          const qrCodeCanvasForDownload = await renderQrCodeToCanvas(qrCodeContent, settings)
-
-          if (qrCodeCanvasForDownload) {
-            tempCtx.drawImage(
-              qrCodeCanvasForDownload,
-              settings.qrCodePosition.x,
-              settings.qrCodePosition.y,
-              settings.qrCodeSize.width,
-              settings.qrCodeSize.height,
-            )
-          } else {
-            console.error("Failed to get QR code canvas for download.")
-          }
+        // Draw QR Code using the same method as canvas preview
+        if (downloadQrCanvas) {
+          tempCtx.drawImage(
+            downloadQrCanvas,
+            settings.qrCodePosition.x,
+            settings.qrCodePosition.y,
+            settings.qrCodeSize.width,
+            settings.qrCodeSize.height,
+          )
+        } else {
+          console.error("QR code canvas not ready for download.")
         }
       } else {
         // Back ID - expiry date - use settings position and font, make bold
@@ -591,6 +516,23 @@ export default function IdGenerator() {
           </div>
         </div>
       </main>
+
+      {/* Hidden QR Code Renderer for Download - uses the same library as canvas preview */}
+      {qrCodeContent && (
+        <QRCodeRenderer
+          value={qrCodeContent}
+          size={settings.qrCodeSize.width}
+          fgColor="#003b64"
+          bgColor="#FFFFFF00"
+          qrStyle={settings.qrCodeModuleShape}
+          eyeShape={settings.qrCodeEyeShape}
+          cornerRadius={settings.qrCodeCornerRadius}
+          errorCorrectionLevel={settings.qrCodeErrorCorrection}
+          margin={settings.qrCodeMargin}
+          onCanvasReady={handleDownloadQRCanvasReady}
+          key={`download-${settings.qrCodeSize.width}-${settings.qrCodeSize.height}-${settings.qrCodeModuleShape}-${settings.qrCodeEyeShape}-${settings.qrCodeCornerRadius}-${settings.qrCodeErrorCorrection}-${settings.qrCodeMargin}`}
+        />
+      )}
     </div>
   )
 }
