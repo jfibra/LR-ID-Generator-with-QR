@@ -18,6 +18,7 @@ export default function IdGenerator() {
   const [isImageSelected, setIsImageSelected] = useState(false) // New state for image selection
   const [isFront, setIsFront] = useState(true) // New state to track which side is being displayed
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
+  const [hasLoggedAccess, setHasLoggedAccess] = useState(false) // Track if we've already logged access
 
   // Calculate expiry date (6 months from now)
   const getExpiryDate = () => {
@@ -105,10 +106,14 @@ export default function IdGenerator() {
         const displayName = `${parsedData.fn} ${parsedData.ln}`.trim()
         setEditableName(displayName)
 
-        // Log the access to ID generator
-        setTimeout(() => {
-          logIdGeneration("access")
-        }, 1000)
+        // Log the access to ID generator only once
+        if (!hasLoggedAccess) {
+          setHasLoggedAccess(true)
+          // Use setTimeout to avoid blocking the render
+          setTimeout(() => {
+            logIdGeneration("access")
+          }, 100)
+        }
       } catch (error) {
         console.error("Error parsing member data:", error)
       }
@@ -118,7 +123,7 @@ export default function IdGenerator() {
     }
 
     setLoading(false)
-  }, [router, logIdGeneration])
+  }, [router]) // Removed logIdGeneration from dependencies to prevent re-renders
 
   const handleSettingsChange = useCallback((newSettings: IdSettingsType) => {
     setSettings((prev) => ({
@@ -181,7 +186,7 @@ export default function IdGenerator() {
 
   const handleDownload = async (isFront: boolean) => {
     // Log the download attempt
-    await logIdGeneration(isFront ? "front_download" : "back_download")
+    logIdGeneration(isFront ? "front_download" : "back_download")
 
     // Create a temporary canvas for high-resolution export
     const tempCanvas = document.createElement("canvas")
