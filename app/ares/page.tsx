@@ -82,7 +82,7 @@ export default function AresPage() {
         {/* Main Card */}
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="text-center mb-6">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Ares ID Generator</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Leuterio Realty ID Generator</h1>
             <p className="text-gray-600">Enter your Leuterio Realty email address to generate your ID</p>
           </div>
 
