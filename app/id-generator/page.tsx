@@ -524,8 +524,7 @@ export default function IdGenerator() {
                   image.
                 </p>
                 <p className="text-gray-600 text-sm">
-                  <strong>Text Positioning:</strong> Text positions and font sizes are now fixed for consistency. Only
-                  the expiry date can be edited.
+                  <strong>Text Positioning:</strong> Text positions and font sizes are now fixed for consistency.
                 </p>
               </div>
             </div>
