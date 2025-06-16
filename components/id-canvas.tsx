@@ -93,6 +93,15 @@ export default function IdCanvas({
   const [qrCanvas, setQrCanvas] = useState<HTMLCanvasElement | null>(null)
   const dprRef = useRef(1)
 
+  // Cache for loaded images to prevent re-loading
+  const uploadedImageRef = useRef<HTMLImageElement | null>(null)
+  const idImageRef = useRef<HTMLImageElement | null>(null)
+
+  // Throttling for mobile performance
+  const lastUpdateTimeRef = useRef(0)
+  const animationFrameRef = useRef<number | null>(null)
+  const pendingPositionRef = useRef<{ x: number; y: number } | null>(null)
+
   // Canvas dimensions based on actual ID card size (in pixels)
   const CANVAS_WIDTH = 1050
   const CANVAS_HEIGHT = 1650
@@ -122,6 +131,30 @@ export default function IdCanvas({
       )
     },
     [uploadedImageUrl, uploadedImagePosition, uploadedImageSize],
+  )
+
+  // Throttled position update for smooth mobile performance
+  const throttledPositionUpdate = useCallback(
+    (newPosition: { x: number; y: number }) => {
+      pendingPositionRef.current = newPosition
+
+      if (animationFrameRef.current) {
+        return // Already scheduled
+      }
+
+      animationFrameRef.current = requestAnimationFrame(() => {
+        const now = Date.now()
+        if (now - lastUpdateTimeRef.current >= 16) {
+          // ~60fps max
+          if (pendingPositionRef.current && onImagePositionChange) {
+            onImagePositionChange(pendingPositionRef.current)
+            lastUpdateTimeRef.current = now
+          }
+        }
+        animationFrameRef.current = null
+      })
+    },
+    [onImagePositionChange],
   )
 
   // Mouse event handlers
@@ -164,17 +197,17 @@ export default function IdCanvas({
           x: coords.x / dprRef.current - dragOffset.x,
           y: coords.y / dprRef.current - dragOffset.y,
         }
-        onImagePositionChange?.(newPosition)
+        throttledPositionUpdate(newPosition)
       }
     },
-    [uploadedImageUrl, getCanvasCoordinates, isPointInImage, isDragging, dragOffset, onImagePositionChange],
+    [uploadedImageUrl, getCanvasCoordinates, isPointInImage, isDragging, dragOffset, throttledPositionUpdate],
   )
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false)
   }, [])
 
-  // Touch event handlers for mobile
+  // Touch event handlers for mobile - optimized
   const handleTouchStart = useCallback(
     (e: TouchEvent) => {
       if (!uploadedImageUrl || e.touches.length !== 1) return
@@ -208,10 +241,12 @@ export default function IdCanvas({
         x: coords.x / dprRef.current - dragOffset.x,
         y: coords.y / dprRef.current - dragOffset.y,
       }
-      onImagePositionChange?.(newPosition)
+
+      // Use throttled update for smooth mobile performance
+      throttledPositionUpdate(newPosition)
       e.preventDefault()
     },
-    [uploadedImageUrl, isDragging, getCanvasCoordinates, dragOffset, onImagePositionChange],
+    [uploadedImageUrl, isDragging, getCanvasCoordinates, dragOffset, throttledPositionUpdate],
   )
 
   const handleTouchEnd = useCallback((e: TouchEvent) => {
@@ -239,12 +274,17 @@ export default function IdCanvas({
     document.addEventListener("mousemove", mouseMoveHandler)
     document.addEventListener("mouseup", mouseUpHandler)
 
-    // Add touch event listeners
+    // Add touch event listeners with passive: false for preventDefault
     canvas.addEventListener("touchstart", touchStartHandler, { passive: false })
     canvas.addEventListener("touchmove", touchMoveHandler, { passive: false })
     canvas.addEventListener("touchend", touchEndHandler, { passive: false })
 
     return () => {
+      // Clean up animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+
       // Remove mouse event listeners
       canvas.removeEventListener("mousedown", mouseDownHandler)
       document.removeEventListener("mousemove", mouseMoveHandler)
@@ -279,8 +319,58 @@ export default function IdCanvas({
     setQrCanvas(canvas)
   }, [])
 
-  // Main canvas drawing logic
-  useEffect(() => {
+  // Optimized image loading with caching
+  const loadImages = useCallback(async () => {
+    const promises: Promise<void>[] = []
+
+    // Load uploaded image if needed
+    if (uploadedImageUrl && (!uploadedImageRef.current || uploadedImageRef.current.src !== uploadedImageUrl)) {
+      const uploadedImgPromise = new Promise<void>((resolve) => {
+        const img = new window.Image()
+        img.crossOrigin = "anonymous"
+        img.onload = () => {
+          uploadedImageRef.current = img
+          if (!imageEntry.originalPhotoSize) {
+            setImageEntry((prev) => ({
+              ...prev,
+              originalPhotoSize: {
+                width: img.naturalWidth,
+                height: img.naturalHeight,
+              },
+            }))
+          }
+          resolve()
+        }
+        img.onerror = () => {
+          console.error("Failed to load uploaded image")
+          resolve()
+        }
+        img.src = uploadedImageUrl
+      })
+      promises.push(uploadedImgPromise)
+    }
+
+    // Load ID background if needed
+    const idImageSrc = isFront ? "/images/front-id.png" : "/images/back-id.png"
+    if (!idImageRef.current || idImageRef.current.src !== idImageSrc) {
+      const idImgPromise = new Promise<void>((resolve, reject) => {
+        const img = new window.Image()
+        img.crossOrigin = "anonymous"
+        img.onload = () => {
+          idImageRef.current = img
+          resolve()
+        }
+        img.onerror = reject
+        img.src = idImageSrc
+      })
+      promises.push(idImgPromise)
+    }
+
+    await Promise.all(promises)
+  }, [uploadedImageUrl, isFront, imageEntry.originalPhotoSize])
+
+  // Optimized canvas drawing
+  const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -291,123 +381,78 @@ export default function IdCanvas({
     dprRef.current = dpr
     const rect = canvas.getBoundingClientRect()
 
-    canvas.width = CANVAS_WIDTH * dpr
-    canvas.height = CANVAS_HEIGHT * dpr
-    canvas.style.width = `${rect.width}px`
-    canvas.style.height = `${rect.height}px`
-
-    ctx.scale(dpr, dpr)
-    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-
-    const loadImagesAndDraw = async () => {
-      setIsLoading(true)
-
-      try {
-        // Load uploaded image first (to draw behind background)
-        let uploadedImg: HTMLImageElement | null = null
-        if (uploadedImageUrl) {
-          uploadedImg = new window.Image()
-          uploadedImg.crossOrigin = "anonymous"
-          uploadedImg.src = uploadedImageUrl
-
-          await new Promise((resolve) => {
-            uploadedImg!.onload = () => {
-              if (!imageEntry.originalPhotoSize) {
-                setImageEntry((prev) => ({
-                  ...prev,
-                  originalPhotoSize: {
-                    width: uploadedImg!.naturalWidth,
-                    height: uploadedImg!.naturalHeight,
-                  },
-                }))
-              }
-              resolve(null)
-            }
-            uploadedImg!.onerror = () => {
-              console.error("Failed to load uploaded image")
-              resolve(null)
-            }
-          })
-        }
-
-        // Load ID background image (front or back)
-        const idImage = new window.Image()
-        idImage.crossOrigin = "anonymous"
-        idImage.src = isFront ? "/images/front-id.png" : "/images/back-id.png"
-
-        await new Promise((resolve, reject) => {
-          idImage.onload = resolve
-          idImage.onerror = reject
-        })
-
-        // Draw uploaded image BEHIND the background (if available)
-        if (uploadedImg && isFront) {
-          ctx.drawImage(
-            uploadedImg,
-            uploadedImagePosition.x,
-            uploadedImagePosition.y,
-            uploadedImageSize.width,
-            uploadedImageSize.height,
-          )
-        }
-
-        // Draw ID background on top
-        ctx.drawImage(idImage, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-
-        // If showing front, draw text elements on top
-        if (isFront) {
-          // Draw name
-          const baseNameFontSize = Number.parseInt(nameFont)
-          const fittingNameFontSize = getFittingFontSize(ctx, editableName, nameWidth, baseNameFontSize, true)
-          ctx.font = `bold ${fittingNameFontSize}px Arial`
-          ctx.fillStyle = "#003b64"
-          ctx.textAlign = nameAlign
-          ctx.fillText(editableName, namePosition.x, namePosition.y)
-
-          // Draw member ID
-          const baseMemberIdFontSize = Number.parseInt(memberIdFont)
-          ctx.font = `bold ${baseMemberIdFontSize}px Arial`
-          ctx.fillStyle = "#003b64"
-          ctx.textAlign = "left"
-          ctx.fillText(memberData.memberid.toString(), memberIdPosition.x, memberIdPosition.y)
-
-          // Draw QR Code if available
-          if (qrCanvas) {
-            ctx.drawImage(qrCanvas, qrCodePosition.x, qrCodePosition.y, qrCodeSize.width, qrCodeSize.height)
-          }
-
-          // Draw selection border around image if selected
-          if (uploadedImg && isImageSelected) {
-            ctx.strokeStyle = "#007bff"
-            ctx.lineWidth = 2
-            ctx.setLineDash([5, 5])
-            ctx.strokeRect(
-              uploadedImagePosition.x,
-              uploadedImagePosition.y,
-              uploadedImageSize.width,
-              uploadedImageSize.height,
-            )
-            ctx.setLineDash([])
-          }
-        } else {
-          // Back ID - draw expiry date
-          const baseExpiryFontSize = Number.parseInt(expiryFont)
-          ctx.font = `bold ${baseExpiryFontSize}px Arial`
-          ctx.fillStyle = "#003b64"
-          ctx.textAlign = "left"
-          ctx.fillText(expiryDate, expiryPosition.x, expiryPosition.y)
-        }
-      } catch (error) {
-        console.error("Error rendering ID:", error)
-      } finally {
-        setIsLoading(false)
-      }
+    // Only resize canvas if dimensions changed
+    if (canvas.width !== CANVAS_WIDTH * dpr || canvas.height !== CANVAS_HEIGHT * dpr) {
+      canvas.width = CANVAS_WIDTH * dpr
+      canvas.height = CANVAS_HEIGHT * dpr
+      canvas.style.width = `${rect.width}px`
+      canvas.style.height = `${rect.height}px`
+      ctx.scale(dpr, dpr)
+    } else {
+      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
     }
 
-    loadImagesAndDraw()
+    // Draw uploaded image BEHIND the background (if available and cached)
+    if (uploadedImageRef.current && isFront) {
+      ctx.drawImage(
+        uploadedImageRef.current,
+        uploadedImagePosition.x,
+        uploadedImagePosition.y,
+        uploadedImageSize.width,
+        uploadedImageSize.height,
+      )
+    }
+
+    // Draw ID background on top (if cached)
+    if (idImageRef.current) {
+      ctx.drawImage(idImageRef.current, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+    }
+
+    // If showing front, draw text elements on top
+    if (isFront) {
+      // Draw name
+      const baseNameFontSize = Number.parseInt(nameFont)
+      const fittingNameFontSize = getFittingFontSize(ctx, editableName, nameWidth, baseNameFontSize, true)
+      ctx.font = `bold ${fittingNameFontSize}px Arial`
+      ctx.fillStyle = "#003b64"
+      ctx.textAlign = nameAlign
+      ctx.fillText(editableName, namePosition.x, namePosition.y)
+
+      // Draw member ID
+      const baseMemberIdFontSize = Number.parseInt(memberIdFont)
+      ctx.font = `bold ${baseMemberIdFontSize}px Arial`
+      ctx.fillStyle = "#003b64"
+      ctx.textAlign = "left"
+      ctx.fillText(memberData.memberid.toString(), memberIdPosition.x, memberIdPosition.y)
+
+      // Draw QR Code if available
+      if (qrCanvas) {
+        ctx.drawImage(qrCanvas, qrCodePosition.x, qrCodePosition.y, qrCodeSize.width, qrCodeSize.height)
+      }
+
+      // Draw selection border around image if selected
+      if (uploadedImageRef.current && isImageSelected) {
+        ctx.strokeStyle = "#007bff"
+        ctx.lineWidth = 2
+        ctx.setLineDash([5, 5])
+        ctx.strokeRect(
+          uploadedImagePosition.x,
+          uploadedImagePosition.y,
+          uploadedImageSize.width,
+          uploadedImageSize.height,
+        )
+        ctx.setLineDash([])
+      }
+    } else {
+      // Back ID - draw expiry date
+      const baseExpiryFontSize = Number.parseInt(expiryFont)
+      ctx.font = `bold ${baseExpiryFontSize}px Arial`
+      ctx.fillStyle = "#003b64"
+      ctx.textAlign = "left"
+      ctx.fillText(expiryDate, expiryPosition.x, expiryPosition.y)
+    }
   }, [
     memberData,
-    position,
     isFront,
     namePosition,
     nameFont,
@@ -415,28 +460,41 @@ export default function IdCanvas({
     nameAlign,
     memberIdPosition,
     memberIdFont,
-    positionPosition,
-    positionFont,
-    positionWidth,
-    positionAlign,
-    uploadedImageUrl,
     uploadedImagePosition,
     uploadedImageSize,
     editableName,
-    imageEntry.originalPhotoSize,
     isImageSelected,
     expiryDate,
     expiryPosition,
     expiryFont,
-    qrCanvas, // Add qrCanvas as dependency
-    qrCodePosition, // Add QR code position
-    qrCodeSize, // Add QR code size
-    qrCodeModuleShape, // Add module shape
-    qrCodeEyeShape, // Add eye shape
-    qrCodeCornerRadius, // Add corner radius
-    qrCodeErrorCorrection, // Add error correction
-    qrCodeMargin, // Add margin
+    qrCanvas,
+    qrCodePosition,
+    qrCodeSize,
   ])
+
+  // Main effect for loading and drawing
+  useEffect(() => {
+    const loadAndDraw = async () => {
+      setIsLoading(true)
+      try {
+        await loadImages()
+        drawCanvas()
+      } catch (error) {
+        console.error("Error rendering ID:", error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadAndDraw()
+  }, [loadImages, drawCanvas])
+
+  // Separate effect for position changes during dragging (no loading state)
+  useEffect(() => {
+    if (!isLoading && (uploadedImageRef.current || idImageRef.current)) {
+      drawCanvas()
+    }
+  }, [uploadedImagePosition, drawCanvas, isLoading])
 
   const qrCodeContent = memberData.email ? `https://leuteriorealty.com/business-card?email=${memberData.email}` : ""
 
@@ -446,8 +504,13 @@ export default function IdCanvas({
         ref={canvasRef}
         width={CANVAS_WIDTH}
         height={CANVAS_HEIGHT}
-        className="w-full h-auto rounded-lg shadow-lg border touch-none"
-        style={{ maxWidth: "100%", height: "auto" }}
+        className="w-full h-auto rounded-lg shadow-lg border touch-none select-none"
+        style={{
+          maxWidth: "100%",
+          height: "auto",
+          // Optimize for mobile performance
+          willChange: isDragging ? "transform" : "auto",
+        }}
       />
 
       {/* QR Code Renderer - hidden but generates the QR code canvas */}
@@ -457,13 +520,12 @@ export default function IdCanvas({
           size={qrCodeSize.width}
           fgColor="#003b64"
           bgColor="#FFFFFF00"
-          qrStyle={qrCodeModuleShape} // Pass qrStyle directly
-          eyeShape={qrCodeEyeShape} // Pass eyeShape directly
-          cornerRadius={qrCodeCornerRadius} // Pass cornerRadius directly
+          qrStyle={qrCodeModuleShape}
+          eyeShape={qrCodeEyeShape}
+          cornerRadius={qrCodeCornerRadius}
           errorCorrectionLevel={qrCodeErrorCorrection}
           margin={qrCodeMargin}
           onCanvasReady={handleQRCanvasReady}
-          // Add a key prop to force re-render when settings change
           key={`${qrCodeSize.width}-${qrCodeSize.height}-${qrCodeModuleShape}-${qrCodeEyeShape}-${qrCodeCornerRadius}-${qrCodeErrorCorrection}-${qrCodeMargin}`}
         />
       )}
