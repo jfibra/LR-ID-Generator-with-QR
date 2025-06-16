@@ -13,7 +13,7 @@ export async function POST(request: Request) {
       middleName,
       lastName,
       completeName,
-      memberType,
+      memberType, // We'll receive this but not send it to Laravel
       status,
       sessionId,
       action, // 'access', 'front_download', 'back_download'
@@ -23,14 +23,14 @@ export async function POST(request: Request) {
     const userAgent = headersList.get("user-agent") || ""
     const ipAddress = headersList.get("x-forwarded-for") || headersList.get("x-real-ip") || "unknown"
 
-    // Prepare data for Laravel API
+    // Prepare data for Laravel API - removed member_type field
     const logData = {
       member_id: memberId,
       email: email,
       first_name: firstName,
       middle_name: middleName,
       last_name: lastName,
-      member_type: memberType,
+      // member_type: memberType, // Removed this field
       status: status,
       user_agent: userAgent,
       ip_address: ipAddress,
@@ -66,7 +66,8 @@ export async function POST(request: Request) {
         {
           success: false,
           message: "Failed to log to Laravel API",
-          error: errorData.message || `API responded with status ${response.status}`,
+          error: errorData.message || errorData.errors || `API responded with status ${response.status}`,
+          details: errorData, // Include full error details for debugging
         },
         { status: response.status },
       )
