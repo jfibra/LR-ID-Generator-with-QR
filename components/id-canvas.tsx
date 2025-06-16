@@ -86,6 +86,7 @@ export default function IdCanvas({
   onImageSelectedChange,
 }: IdCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
@@ -125,8 +126,10 @@ export default function IdCanvas({
     if (!canvas) return { x: 0, y: 0 }
 
     const rect = canvas.getBoundingClientRect()
-    const scaleX = canvas.width / rect.width
-    const scaleY = canvas.height / rect.height
+    // Use the actual canvas dimensions for scaling
+    const scaleX = CANVAS_WIDTH / rect.width
+    const scaleY = CANVAS_HEIGHT / rect.height
+
     return {
       x: (clientX - rect.left) * scaleX,
       y: (clientY - rect.top) * scaleY,
@@ -136,16 +139,24 @@ export default function IdCanvas({
   const isPointInImage = useCallback(
     (x: number, y: number) => {
       if (!uploadedImageUrl) return false
-      const dpr = dprRef.current
+      // Use logical coordinates, not scaled by DPR
       return (
-        x >= uploadedImagePosition.x * dpr &&
-        x <= (uploadedImagePosition.x + uploadedImageSize.width) * dpr &&
-        y >= uploadedImagePosition.y * dpr &&
-        y <= (uploadedImagePosition.y + uploadedImageSize.height) * dpr
+        x >= uploadedImagePosition.x &&
+        x <= uploadedImagePosition.x + uploadedImageSize.width &&
+        y >= uploadedImagePosition.y &&
+        y <= uploadedImagePosition.y + uploadedImageSize.height
       )
     },
     [uploadedImageUrl, uploadedImagePosition, uploadedImageSize],
   )
+
+  const isPointInCanvas = useCallback((clientX: number, clientY: number) => {
+    const canvas = canvasRef.current
+    if (!canvas) return false
+
+    const rect = canvas.getBoundingClientRect()
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+  }, [])
 
   // Mobile-optimized position update with throttling
   const updatePositionMobile = useCallback(
@@ -192,15 +203,23 @@ export default function IdCanvas({
         setIsDragging(true)
         onImageSelectedChange(true)
         setDragOffset({
-          x: coords.x / dprRef.current - uploadedImagePosition.x,
-          y: coords.y / dprRef.current - uploadedImagePosition.y,
+          x: coords.x - uploadedImagePosition.x,
+          y: coords.y - uploadedImagePosition.y,
         })
         e.preventDefault()
-      } else {
+      } else if (isPointInCanvas(e.clientX, e.clientY)) {
+        // Only deselect if clicking inside canvas but outside image
         onImageSelectedChange(false)
       }
     },
-    [uploadedImageUrl, getCanvasCoordinates, isPointInImage, uploadedImagePosition, onImageSelectedChange],
+    [
+      uploadedImageUrl,
+      getCanvasCoordinates,
+      isPointInImage,
+      isPointInCanvas,
+      uploadedImagePosition,
+      onImageSelectedChange,
+    ],
   )
 
   const handleMouseMove = useCallback(
@@ -218,8 +237,8 @@ export default function IdCanvas({
 
       if (isDragging) {
         const newPosition = {
-          x: coords.x / dprRef.current - dragOffset.x,
-          y: coords.y / dprRef.current - dragOffset.y,
+          x: coords.x - dragOffset.x,
+          y: coords.y - dragOffset.y,
         }
         // Desktop gets immediate updates
         updatePositionDesktop(newPosition)
@@ -232,7 +251,7 @@ export default function IdCanvas({
     setIsDragging(false)
   }, [])
 
-  // Touch event handlers (Mobile) - optimized
+  // Touch event handlers (Mobile) - improved
   const handleTouchStart = useCallback(
     (e: TouchEvent) => {
       if (!uploadedImageUrl || e.touches.length !== 1) return
@@ -240,19 +259,38 @@ export default function IdCanvas({
       const touch = e.touches[0]
       const coords = getCanvasCoordinates(touch.clientX, touch.clientY)
 
+      console.log("Touch start:", {
+        touchCoords: { x: touch.clientX, y: touch.clientY },
+        canvasCoords: coords,
+        imagePos: uploadedImagePosition,
+        imageSize: uploadedImageSize,
+        isInImage: isPointInImage(coords.x, coords.y),
+        isInCanvas: isPointInCanvas(touch.clientX, touch.clientY),
+      })
+
       if (isPointInImage(coords.x, coords.y)) {
         setIsDragging(true)
         onImageSelectedChange(true)
         setDragOffset({
-          x: coords.x / dprRef.current - uploadedImagePosition.x,
-          y: coords.y / dprRef.current - uploadedImagePosition.y,
+          x: coords.x - uploadedImagePosition.x,
+          y: coords.y - uploadedImagePosition.y,
         })
         e.preventDefault()
-      } else {
+        e.stopPropagation()
+      } else if (isPointInCanvas(touch.clientX, touch.clientY)) {
+        // Only deselect if touching inside canvas but outside image
         onImageSelectedChange(false)
+        e.preventDefault()
       }
     },
-    [uploadedImageUrl, getCanvasCoordinates, isPointInImage, uploadedImagePosition, onImageSelectedChange],
+    [
+      uploadedImageUrl,
+      getCanvasCoordinates,
+      isPointInImage,
+      isPointInCanvas,
+      uploadedImagePosition,
+      onImageSelectedChange,
+    ],
   )
 
   const handleTouchMove = useCallback(
@@ -263,21 +301,50 @@ export default function IdCanvas({
       const coords = getCanvasCoordinates(touch.clientX, touch.clientY)
 
       const newPosition = {
-        x: coords.x / dprRef.current - dragOffset.x,
-        y: coords.y / dprRef.current - dragOffset.y,
+        x: coords.x - dragOffset.x,
+        y: coords.y - dragOffset.y,
       }
+
+      console.log("Touch move:", {
+        touchCoords: { x: touch.clientX, y: touch.clientY },
+        canvasCoords: coords,
+        newPosition,
+        dragOffset,
+      })
 
       // Mobile gets throttled updates
       updatePositionMobile(newPosition)
       e.preventDefault()
+      e.stopPropagation()
     },
     [uploadedImageUrl, isDragging, getCanvasCoordinates, dragOffset, updatePositionMobile],
   )
 
-  const handleTouchEnd = useCallback((e: TouchEvent) => {
-    setIsDragging(false)
-    e.preventDefault()
-  }, [])
+  const handleTouchEnd = useCallback(
+    (e: TouchEvent) => {
+      console.log("Touch end, was dragging:", isDragging)
+      setIsDragging(false)
+      e.preventDefault()
+    },
+    [isDragging],
+  )
+
+  // Global click handler to handle clicks outside canvas
+  const handleGlobalClick = useCallback(
+    (e: MouseEvent | TouchEvent) => {
+      const canvas = canvasRef.current
+      const container = containerRef.current
+      if (!canvas || !container) return
+
+      const target = e.target as Element
+
+      // Check if the click/touch is outside the entire canvas container
+      if (!container.contains(target)) {
+        onImageSelectedChange(false)
+      }
+    },
+    [onImageSelectedChange],
+  )
 
   // Event listeners setup
   useEffect(() => {
@@ -294,15 +361,21 @@ export default function IdCanvas({
     const touchMoveHandler = (e: TouchEvent) => handleTouchMove(e)
     const touchEndHandler = (e: TouchEvent) => handleTouchEnd(e)
 
-    // Add mouse event listeners
-    canvas.addEventListener("mousedown", mouseDownHandler)
-    document.addEventListener("mousemove", mouseMoveHandler)
-    document.addEventListener("mouseup", mouseUpHandler)
+    // Global click/touch handlers
+    const globalClickHandler = (e: MouseEvent) => handleGlobalClick(e)
+    const globalTouchHandler = (e: TouchEvent) => handleGlobalClick(e)
 
-    // Add touch event listeners
+    // Add canvas-specific event listeners
+    canvas.addEventListener("mousedown", mouseDownHandler)
     canvas.addEventListener("touchstart", touchStartHandler, { passive: false })
     canvas.addEventListener("touchmove", touchMoveHandler, { passive: false })
     canvas.addEventListener("touchend", touchEndHandler, { passive: false })
+
+    // Add document-level event listeners
+    document.addEventListener("mousemove", mouseMoveHandler)
+    document.addEventListener("mouseup", mouseUpHandler)
+    document.addEventListener("click", globalClickHandler, true) // Use capture phase
+    document.addEventListener("touchend", globalTouchHandler, true) // Use capture phase
 
     return () => {
       // Clean up mobile animation frame
@@ -310,17 +383,27 @@ export default function IdCanvas({
         cancelAnimationFrame(mobileAnimationFrameRef.current)
       }
 
-      // Remove mouse event listeners
+      // Remove canvas event listeners
       canvas.removeEventListener("mousedown", mouseDownHandler)
-      document.removeEventListener("mousemove", mouseMoveHandler)
-      document.removeEventListener("mouseup", mouseUpHandler)
-
-      // Remove touch event listeners
       canvas.removeEventListener("touchstart", touchStartHandler)
       canvas.removeEventListener("touchmove", touchMoveHandler)
       canvas.removeEventListener("touchend", touchEndHandler)
+
+      // Remove document event listeners
+      document.removeEventListener("mousemove", mouseMoveHandler)
+      document.removeEventListener("mouseup", mouseUpHandler)
+      document.removeEventListener("click", globalClickHandler, true)
+      document.removeEventListener("touchend", globalTouchHandler, true)
     }
-  }, [handleMouseDown, handleMouseMove, handleMouseUp, handleTouchStart, handleTouchMove, handleTouchEnd])
+  }, [
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+    handleTouchStart,
+    handleTouchMove,
+    handleTouchEnd,
+    handleGlobalClick,
+  ])
 
   const getFittingFontSize = (
     ctx: CanvasRenderingContext2D,
@@ -531,7 +614,7 @@ export default function IdCanvas({
   const qrCodeContent = memberData.email ? `https://leuteriorealty.com/business-card?email=${memberData.email}` : ""
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <canvas
         ref={canvasRef}
         width={CANVAS_WIDTH}
