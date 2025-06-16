@@ -398,7 +398,7 @@ export default function IdCanvas({
     await Promise.all(promises)
   }, [uploadedImageUrl, isFront, imageEntry.originalPhotoSize])
 
-  // Optimized canvas drawing with proper scaling
+  // Fixed canvas drawing with proper responsive sizing
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -408,16 +408,17 @@ export default function IdCanvas({
 
     const dpr = window.devicePixelRatio || 1
     dprRef.current = dpr
+    const rect = canvas.getBoundingClientRect()
 
-    // Set canvas size properly
+    // Set canvas internal size with device pixel ratio for crisp rendering
     canvas.width = CANVAS_WIDTH * dpr
     canvas.height = CANVAS_HEIGHT * dpr
 
-    // Scale the canvas back down using CSS
-    canvas.style.width = `${CANVAS_WIDTH}px`
-    canvas.style.height = `${CANVAS_HEIGHT}px`
+    // Set canvas display size to maintain responsive behavior
+    canvas.style.width = `${rect.width}px`
+    canvas.style.height = `${rect.height}px`
 
-    // Scale the drawing context so everything draws at the correct size
+    // Scale the drawing context to match the device pixel ratio
     ctx.scale(dpr, dpr)
 
     // Clear the canvas
@@ -533,6 +534,8 @@ export default function IdCanvas({
     <div className="relative">
       <canvas
         ref={canvasRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
         className="w-full h-auto rounded-lg shadow-lg border touch-none select-none"
         style={{
           maxWidth: "100%",
