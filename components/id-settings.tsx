@@ -190,6 +190,20 @@ export default function IdSettings({
     }
   }
 
+  // New function to handle +/- button clicks
+  const adjustScale = (increment: number) => {
+    const newScale = Math.max(25, Math.min(500, photoScale + increment))
+    setPhotoScale(newScale)
+
+    if (originalImageSize) {
+      const scaleMultiplier = newScale / 100
+      const newWidth = originalImageSize.width * scaleMultiplier
+      const newHeight = originalImageSize.height * scaleMultiplier
+
+      handleChange("uploadedImageSize", { width: newWidth, height: newHeight })
+    }
+  }
+
   const resetImagePosition = () => {
     handleChange("uploadedImagePosition", { x: 150, y: 200 })
     if (originalImageSize) {
@@ -235,7 +249,7 @@ export default function IdSettings({
             <input type="file" accept="image/*" onChange={handleFileChange} className="w-full text-sm" />
             {uploadedImageUrl && (
               <div className="mt-2 text-xs text-gray-500">
-                Image uploaded. Click on canvas to select, drag to move, click outside to deselect.
+                Image uploaded. On desktop: click and drag to move. On mobile: use touch controls in the canvas area.
               </div>
             )}
           </div>
@@ -243,18 +257,39 @@ export default function IdSettings({
           {uploadedImageUrl && (
             <>
               <div className="mb-4">
-                <label className="block text-sm text-gray-600 mb-1">Photo Size: {photoScale}%</label>
-                <input
-                  type="range"
-                  min="25"
-                  max="1000"
-                  value={photoScale}
-                  onChange={handleScaleChange}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <label className="block text-sm text-gray-600 mb-2">Photo Size: {photoScale}%</label>
+
+                {/* Mobile-friendly controls with +/- buttons */}
+                <div className="flex items-center gap-2 mb-2">
+                  <button
+                    onClick={() => adjustScale(-5)}
+                    className="flex-shrink-0 w-8 h-8 bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center text-sm font-bold"
+                    disabled={photoScale <= 25}
+                  >
+                    −
+                  </button>
+
+                  <input
+                    type="range"
+                    min="25"
+                    max="500"
+                    value={photoScale}
+                    onChange={handleScaleChange}
+                    className="flex-1"
+                  />
+
+                  <button
+                    onClick={() => adjustScale(5)}
+                    className="flex-shrink-0 w-8 h-8 bg-gray-200 hover:bg-gray-300 rounded flex items-center justify-center text-sm font-bold"
+                    disabled={photoScale >= 500}
+                  >
+                    +
+                  </button>
+                </div>
+
+                <div className="flex justify-between text-xs text-gray-500">
                   <span>25%</span>
-                  <span>1000%</span>
+                  <span>500%</span>
                 </div>
               </div>
 

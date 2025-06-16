@@ -97,7 +97,7 @@ export default function IdCanvas({
   const CANVAS_WIDTH = 1050
   const CANVAS_HEIGHT = 1650
 
-  const getCanvasCoordinates = useCallback((e: MouseEvent) => {
+  const getCanvasCoordinates = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current
     if (!canvas) return { x: 0, y: 0 }
 
@@ -105,8 +105,8 @@ export default function IdCanvas({
     const scaleX = canvas.width / rect.width
     const scaleY = canvas.height / rect.height
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
     }
   }, [])
 
@@ -124,11 +124,12 @@ export default function IdCanvas({
     [uploadedImageUrl, uploadedImagePosition, uploadedImageSize],
   )
 
+  // Mouse event handlers
   const handleMouseDown = useCallback(
     (e: MouseEvent) => {
       if (!uploadedImageUrl) return
 
-      const coords = getCanvasCoordinates(e)
+      const coords = getCanvasCoordinates(e.clientX, e.clientY)
 
       if (isPointInImage(coords.x, coords.y)) {
         setIsDragging(true)
@@ -150,7 +151,7 @@ export default function IdCanvas({
       const canvas = canvasRef.current
       if (!canvas || !uploadedImageUrl) return
 
-      const coords = getCanvasCoordinates(e)
+      const coords = getCanvasCoordinates(e.clientX, e.clientY)
 
       if (isPointInImage(coords.x, coords.y)) {
         canvas.style.cursor = "move"
@@ -173,24 +174,88 @@ export default function IdCanvas({
     setIsDragging(false)
   }, [])
 
+  // Touch event handlers for mobile
+  const handleTouchStart = useCallback(
+    (e: TouchEvent) => {
+      if (!uploadedImageUrl || e.touches.length !== 1) return
+
+      const touch = e.touches[0]
+      const coords = getCanvasCoordinates(touch.clientX, touch.clientY)
+
+      if (isPointInImage(coords.x, coords.y)) {
+        setIsDragging(true)
+        onImageSelectedChange(true)
+        setDragOffset({
+          x: coords.x / dprRef.current - uploadedImagePosition.x,
+          y: coords.y / dprRef.current - uploadedImagePosition.y,
+        })
+        e.preventDefault()
+      } else {
+        onImageSelectedChange(false)
+      }
+    },
+    [uploadedImageUrl, getCanvasCoordinates, isPointInImage, uploadedImagePosition, onImageSelectedChange],
+  )
+
+  const handleTouchMove = useCallback(
+    (e: TouchEvent) => {
+      if (!uploadedImageUrl || !isDragging || e.touches.length !== 1) return
+
+      const touch = e.touches[0]
+      const coords = getCanvasCoordinates(touch.clientX, touch.clientY)
+
+      const newPosition = {
+        x: coords.x / dprRef.current - dragOffset.x,
+        y: coords.y / dprRef.current - dragOffset.y,
+      }
+      onImagePositionChange?.(newPosition)
+      e.preventDefault()
+    },
+    [uploadedImageUrl, isDragging, getCanvasCoordinates, dragOffset, onImagePositionChange],
+  )
+
+  const handleTouchEnd = useCallback((e: TouchEvent) => {
+    setIsDragging(false)
+    e.preventDefault()
+  }, [])
+
+  // Event listeners setup
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
+    // Mouse events
     const mouseDownHandler = (e: MouseEvent) => handleMouseDown(e)
     const mouseMoveHandler = (e: MouseEvent) => handleMouseMove(e)
     const mouseUpHandler = () => handleMouseUp()
 
+    // Touch events
+    const touchStartHandler = (e: TouchEvent) => handleTouchStart(e)
+    const touchMoveHandler = (e: TouchEvent) => handleTouchMove(e)
+    const touchEndHandler = (e: TouchEvent) => handleTouchEnd(e)
+
+    // Add mouse event listeners
     canvas.addEventListener("mousedown", mouseDownHandler)
     document.addEventListener("mousemove", mouseMoveHandler)
     document.addEventListener("mouseup", mouseUpHandler)
 
+    // Add touch event listeners
+    canvas.addEventListener("touchstart", touchStartHandler, { passive: false })
+    canvas.addEventListener("touchmove", touchMoveHandler, { passive: false })
+    canvas.addEventListener("touchend", touchEndHandler, { passive: false })
+
     return () => {
+      // Remove mouse event listeners
       canvas.removeEventListener("mousedown", mouseDownHandler)
       document.removeEventListener("mousemove", mouseMoveHandler)
       document.removeEventListener("mouseup", mouseUpHandler)
+
+      // Remove touch event listeners
+      canvas.removeEventListener("touchstart", touchStartHandler)
+      canvas.removeEventListener("touchmove", touchMoveHandler)
+      canvas.removeEventListener("touchend", touchEndHandler)
     }
-  }, [handleMouseDown, handleMouseMove, handleMouseUp])
+  }, [handleMouseDown, handleMouseMove, handleMouseUp, handleTouchStart, handleTouchMove, handleTouchEnd])
 
   const getFittingFontSize = (
     ctx: CanvasRenderingContext2D,
@@ -381,7 +446,7 @@ export default function IdCanvas({
         ref={canvasRef}
         width={CANVAS_WIDTH}
         height={CANVAS_HEIGHT}
-        className="w-full h-auto rounded-lg shadow-lg border"
+        className="w-full h-auto rounded-lg shadow-lg border touch-none"
         style={{ maxWidth: "100%", height: "auto" }}
       />
 
@@ -424,7 +489,7 @@ export default function IdCanvas({
       )}
       {uploadedImageUrl && isImageSelected && (
         <div className="absolute top-2 right-2 bg-blue-600 bg-opacity-90 text-white text-xs px-2 py-1 rounded">
-          Drag to move • Click outside to deselect
+          Drag to move • Touch to move on mobile • Click outside to deselect
         </div>
       )}
     </div>
