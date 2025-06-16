@@ -65,7 +65,9 @@ export default function IdGenerator() {
       if (!memberData) return
 
       try {
-        await fetch("/api/log-id-generation", {
+        console.log(`Logging ID generation action: ${action}`)
+
+        const response = await fetch("/api/log-id-generation", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -83,8 +85,17 @@ export default function IdGenerator() {
             action,
           }),
         })
+
+        const result = await response.json()
+
+        if (result.success) {
+          console.log(`Successfully logged ${action}:`, result.data)
+        } else {
+          console.error(`Failed to log ${action}:`, result.message)
+        }
       } catch (error) {
-        console.error("Failed to log ID generation:", error)
+        console.error(`Failed to log ID generation (${action}):`, error)
+        // Don't throw error to avoid disrupting user experience
       }
     },
     [memberData, sessionId],

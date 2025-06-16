@@ -23,43 +23,62 @@ export async function POST(request: Request) {
     const userAgent = headersList.get("user-agent") || ""
     const ipAddress = headersList.get("x-forwarded-for") || headersList.get("x-real-ip") || "unknown"
 
-    // Here you would typically insert into your database
-    // For now, we'll just log the data and return success
-    console.log("ID Generator Log:", {
-      memberId,
-      email,
-      firstName,
-      middleName,
-      lastName,
-      completeName,
-      memberType,
-      status,
-      userAgent,
-      ipAddress,
-      sessionId,
-      action,
-      timestamp: new Date().toISOString(),
+    // Prepare data for Laravel API
+    const logData = {
+      member_id: memberId,
+      email: email,
+      first_name: firstName,
+      middle_name: middleName,
+      last_name: lastName,
+      member_type: memberType,
+      status: status,
+      user_agent: userAgent,
+      ip_address: ipAddress,
+      session_id: sessionId,
+      front_downloaded: action === "front_download",
+      back_downloaded: action === "back_download",
+      front_download_timestamp: action === "front_download" ? new Date().toISOString() : null,
+      back_download_timestamp: action === "back_download" ? new Date().toISOString() : null,
+    }
+
+    console.log("Sending ID Generator Log to Laravel API:", logData)
+
+    // Send to Laravel API
+    const response = await fetch("https://api.leuteriorealty.com/lr/v1/public/api/id-generator-logs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "LR-ID-Generator-NextJS",
+      },
+      body: JSON.stringify(logData),
     })
 
-    // TODO: Replace this with actual database insertion
-    // Example SQL query would be:
-    /*
-    INSERT INTO id_generator_logs (
-      member_id, email, first_name, middle_name, last_name, complete_name,
-      member_type, status, user_agent, ip_address, session_id,
-      front_downloaded, back_downloaded, front_download_timestamp, back_download_timestamp
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE
-      updated_at = CURRENT_TIMESTAMP,
-      front_downloaded = CASE WHEN ? = 'front_download' THEN TRUE ELSE front_downloaded END,
-      back_downloaded = CASE WHEN ? = 'back_download' THEN TRUE ELSE back_downloaded END,
-      front_download_timestamp = CASE WHEN ? = 'front_download' THEN CURRENT_TIMESTAMP ELSE front_download_timestamp END,
-      back_download_timestamp = CASE WHEN ? = 'back_download' THEN CURRENT_TIMESTAMP ELSE back_download_timestamp END
-    */
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.error("Laravel API Error:", {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorData,
+      })
+
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Failed to log to Laravel API",
+          error: errorData.message || `API responded with status ${response.status}`,
+        },
+        { status: response.status },
+      )
+    }
+
+    const responseData = await response.json()
+    console.log("Laravel API Response:", responseData)
 
     return NextResponse.json({
       success: true,
       message: "ID generation logged successfully",
+      data: responseData,
     })
   } catch (error) {
     console.error("Error logging ID generation:", error)
