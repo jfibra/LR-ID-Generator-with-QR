@@ -97,14 +97,28 @@ export default function IdCanvas({
   const uploadedImageRef = useRef<HTMLImageElement | null>(null)
   const idImageRef = useRef<HTMLImageElement | null>(null)
 
-  // Throttling for mobile performance
-  const lastUpdateTimeRef = useRef(0)
-  const animationFrameRef = useRef<number | null>(null)
-  const pendingPositionRef = useRef<{ x: number; y: number } | null>(null)
+  // Mobile-specific throttling
+  const isMobileRef = useRef(false)
+  const lastMobileUpdateRef = useRef(0)
+  const mobileAnimationFrameRef = useRef<number | null>(null)
+  const pendingMobilePositionRef = useRef<{ x: number; y: number } | null>(null)
 
   // Canvas dimensions based on actual ID card size (in pixels)
   const CANVAS_WIDTH = 1050
   const CANVAS_HEIGHT = 1650
+
+  // Detect if device is mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      isMobileRef.current =
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+        "ontouchstart" in window ||
+        window.innerWidth <= 768
+    }
+    checkMobile()
+    window.addEventListener("resize", checkMobile)
+    return () => window.removeEventListener("resize", checkMobile)
+  }, [])
 
   const getCanvasCoordinates = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current
@@ -133,31 +147,41 @@ export default function IdCanvas({
     [uploadedImageUrl, uploadedImagePosition, uploadedImageSize],
   )
 
-  // Throttled position update for smooth mobile performance
-  const throttledPositionUpdate = useCallback(
+  // Mobile-optimized position update with throttling
+  const updatePositionMobile = useCallback(
     (newPosition: { x: number; y: number }) => {
-      pendingPositionRef.current = newPosition
+      pendingMobilePositionRef.current = newPosition
 
-      if (animationFrameRef.current) {
+      if (mobileAnimationFrameRef.current) {
         return // Already scheduled
       }
 
-      animationFrameRef.current = requestAnimationFrame(() => {
+      mobileAnimationFrameRef.current = requestAnimationFrame(() => {
         const now = Date.now()
-        if (now - lastUpdateTimeRef.current >= 16) {
-          // ~60fps max
-          if (pendingPositionRef.current && onImagePositionChange) {
-            onImagePositionChange(pendingPositionRef.current)
-            lastUpdateTimeRef.current = now
+        if (now - lastMobileUpdateRef.current >= 32) {
+          // ~30fps for mobile
+          if (pendingMobilePositionRef.current && onImagePositionChange) {
+            onImagePositionChange(pendingMobilePositionRef.current)
+            lastMobileUpdateRef.current = now
           }
         }
-        animationFrameRef.current = null
+        mobileAnimationFrameRef.current = null
       })
     },
     [onImagePositionChange],
   )
 
-  // Mouse event handlers
+  // Desktop position update (immediate)
+  const updatePositionDesktop = useCallback(
+    (newPosition: { x: number; y: number }) => {
+      if (onImagePositionChange) {
+        onImagePositionChange(newPosition)
+      }
+    },
+    [onImagePositionChange],
+  )
+
+  // Mouse event handlers (Desktop)
   const handleMouseDown = useCallback(
     (e: MouseEvent) => {
       if (!uploadedImageUrl) return
@@ -197,17 +221,18 @@ export default function IdCanvas({
           x: coords.x / dprRef.current - dragOffset.x,
           y: coords.y / dprRef.current - dragOffset.y,
         }
-        throttledPositionUpdate(newPosition)
+        // Desktop gets immediate updates
+        updatePositionDesktop(newPosition)
       }
     },
-    [uploadedImageUrl, getCanvasCoordinates, isPointInImage, isDragging, dragOffset, throttledPositionUpdate],
+    [uploadedImageUrl, getCanvasCoordinates, isPointInImage, isDragging, dragOffset, updatePositionDesktop],
   )
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false)
   }, [])
 
-  // Touch event handlers for mobile - optimized
+  // Touch event handlers (Mobile) - optimized
   const handleTouchStart = useCallback(
     (e: TouchEvent) => {
       if (!uploadedImageUrl || e.touches.length !== 1) return
@@ -242,11 +267,11 @@ export default function IdCanvas({
         y: coords.y / dprRef.current - dragOffset.y,
       }
 
-      // Use throttled update for smooth mobile performance
-      throttledPositionUpdate(newPosition)
+      // Mobile gets throttled updates
+      updatePositionMobile(newPosition)
       e.preventDefault()
     },
-    [uploadedImageUrl, isDragging, getCanvasCoordinates, dragOffset, throttledPositionUpdate],
+    [uploadedImageUrl, isDragging, getCanvasCoordinates, dragOffset, updatePositionMobile],
   )
 
   const handleTouchEnd = useCallback((e: TouchEvent) => {
@@ -259,12 +284,12 @@ export default function IdCanvas({
     const canvas = canvasRef.current
     if (!canvas) return
 
-    // Mouse events
+    // Mouse events (Desktop)
     const mouseDownHandler = (e: MouseEvent) => handleMouseDown(e)
     const mouseMoveHandler = (e: MouseEvent) => handleMouseMove(e)
     const mouseUpHandler = () => handleMouseUp()
 
-    // Touch events
+    // Touch events (Mobile)
     const touchStartHandler = (e: TouchEvent) => handleTouchStart(e)
     const touchMoveHandler = (e: TouchEvent) => handleTouchMove(e)
     const touchEndHandler = (e: TouchEvent) => handleTouchEnd(e)
@@ -274,15 +299,15 @@ export default function IdCanvas({
     document.addEventListener("mousemove", mouseMoveHandler)
     document.addEventListener("mouseup", mouseUpHandler)
 
-    // Add touch event listeners with passive: false for preventDefault
+    // Add touch event listeners
     canvas.addEventListener("touchstart", touchStartHandler, { passive: false })
     canvas.addEventListener("touchmove", touchMoveHandler, { passive: false })
     canvas.addEventListener("touchend", touchEndHandler, { passive: false })
 
     return () => {
-      // Clean up animation frame
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
+      // Clean up mobile animation frame
+      if (mobileAnimationFrameRef.current) {
+        cancelAnimationFrame(mobileAnimationFrameRef.current)
       }
 
       // Remove mouse event listeners
@@ -343,6 +368,7 @@ export default function IdCanvas({
         }
         img.onerror = () => {
           console.error("Failed to load uploaded image")
+          uploadedImageRef.current = null
           resolve()
         }
         img.src = uploadedImageUrl
@@ -352,7 +378,7 @@ export default function IdCanvas({
 
     // Load ID background if needed
     const idImageSrc = isFront ? "/images/front-id.png" : "/images/back-id.png"
-    if (!idImageRef.current || idImageRef.current.src !== idImageSrc) {
+    if (!idImageRef.current || idImageRef.current.src.includes(idImageSrc) === false) {
       const idImgPromise = new Promise<void>((resolve, reject) => {
         const img = new window.Image()
         img.crossOrigin = "anonymous"
@@ -360,7 +386,10 @@ export default function IdCanvas({
           idImageRef.current = img
           resolve()
         }
-        img.onerror = reject
+        img.onerror = () => {
+          console.error("Failed to load ID background image")
+          reject()
+        }
         img.src = idImageSrc
       })
       promises.push(idImgPromise)
@@ -369,7 +398,7 @@ export default function IdCanvas({
     await Promise.all(promises)
   }, [uploadedImageUrl, isFront, imageEntry.originalPhotoSize])
 
-  // Optimized canvas drawing
+  // Optimized canvas drawing with proper scaling
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -379,18 +408,20 @@ export default function IdCanvas({
 
     const dpr = window.devicePixelRatio || 1
     dprRef.current = dpr
-    const rect = canvas.getBoundingClientRect()
 
-    // Only resize canvas if dimensions changed
-    if (canvas.width !== CANVAS_WIDTH * dpr || canvas.height !== CANVAS_HEIGHT * dpr) {
-      canvas.width = CANVAS_WIDTH * dpr
-      canvas.height = CANVAS_HEIGHT * dpr
-      canvas.style.width = `${rect.width}px`
-      canvas.style.height = `${rect.height}px`
-      ctx.scale(dpr, dpr)
-    } else {
-      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-    }
+    // Set canvas size properly
+    canvas.width = CANVAS_WIDTH * dpr
+    canvas.height = CANVAS_HEIGHT * dpr
+
+    // Scale the canvas back down using CSS
+    canvas.style.width = `${CANVAS_WIDTH}px`
+    canvas.style.height = `${CANVAS_HEIGHT}px`
+
+    // Scale the drawing context so everything draws at the correct size
+    ctx.scale(dpr, dpr)
+
+    // Clear the canvas
+    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
 
     // Draw uploaded image BEHIND the background (if available and cached)
     if (uploadedImageRef.current && isFront) {
@@ -502,14 +533,12 @@ export default function IdCanvas({
     <div className="relative">
       <canvas
         ref={canvasRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
         className="w-full h-auto rounded-lg shadow-lg border touch-none select-none"
         style={{
           maxWidth: "100%",
           height: "auto",
-          // Optimize for mobile performance
-          willChange: isDragging ? "transform" : "auto",
+          // Optimize for mobile performance during dragging
+          willChange: isDragging && isMobileRef.current ? "transform" : "auto",
         }}
       />
 
