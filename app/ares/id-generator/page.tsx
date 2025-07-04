@@ -20,6 +20,12 @@ export default function AresIdGenerator() {
   const [sessionId] = useState(() => `ares_session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   const [hasLoggedAccess, setHasLoggedAccess] = useState(false)
 
+  // Temporarily disable Ares access
+  useEffect(() => {
+    // Redirect to home page - Ares is temporarily unavailable
+    router.push("/")
+  }, [router])
+
   const getExpiryDate = () => {
     const now = new Date()
     const expiry = new Date(now.getFullYear(), now.getMonth() + 6, now.getDate())

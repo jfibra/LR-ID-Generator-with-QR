@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 
@@ -11,6 +11,12 @@ export default function AresPage() {
   const [email, setEmail] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Temporarily disable Ares access
+  useEffect(() => {
+    // Redirect to home page - Ares is temporarily unavailable
+    router.push("/")
+  }, [router])
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
