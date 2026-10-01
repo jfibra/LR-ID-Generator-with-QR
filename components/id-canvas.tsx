@@ -1,22 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
+import QRCodeRenderer from "@/components/qr-code-renderer"
 import type { MemberData } from "@/types/api-types"
-import QRCodeRenderer from "./qr-code-renderer"
-
-interface ImageEntry {
-  photo?: string // base64 data
-  photoPosition?: {
-    x: number
-    y: number
-    width: number
-    height: number
-  }
-  originalPhotoSize?: {
-    width: number
-    height: number
-  }
-}
 
 interface IdCanvasProps {
   memberData: MemberData
@@ -50,11 +36,16 @@ interface IdCanvasProps {
   onImageSizeChange?: (size: { width: number; height: number }) => void
   isImageSelected: boolean
   onImageSelectedChange: (selected: boolean) => void
+  signatureImageUrl?: string | null
+  signaturePosition?: { x: number; y: number }
+  signatureSize?: { width: number; height: number }
+  onSignaturePositionChange?: (position: { x: number; y: number }) => void
+  isSignatureSelected?: boolean
+  onSignatureSelectedChange?: (selected: boolean) => void
 }
 
 export default function IdCanvas({
   memberData,
-  position,
   isFront,
   namePosition,
   nameFont,
@@ -62,10 +53,6 @@ export default function IdCanvas({
   nameAlign,
   memberIdPosition,
   memberIdFont,
-  positionPosition,
-  positionFont,
-  positionWidth,
-  positionAlign,
   uploadedImageUrl,
   uploadedImagePosition,
   uploadedImageSize,
@@ -81,34 +68,37 @@ export default function IdCanvas({
   qrCodeEyeShape,
   qrCodeCornerRadius,
   onImagePositionChange,
-  onImageSizeChange,
   isImageSelected,
   onImageSelectedChange,
+  signatureImageUrl,
+  signaturePosition = { x: 300, y: 120 },
+  signatureSize = { width: 450, height: 130 },
+  onSignaturePositionChange,
+  isSignatureSelected = false,
+  onSignatureSelectedChange,
 }: IdCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
-  const [imageEntry, setImageEntry] = useState<ImageEntry>({})
+  const dragTargetRef = useRef<"profile" | "signature" | null>(null)
+  const originalPhotoSizeRef = useRef<{ width: number; height: number } | null>(null)
   const [qrCanvas, setQrCanvas] = useState<HTMLCanvasElement | null>(null)
   const dprRef = useRef(1)
 
-  // Cache for loaded images to prevent re-loading
+  // Cache for loaded images in memory
   const uploadedImageRef = useRef<HTMLImageElement | null>(null)
-  const idImageRef = useRef<HTMLImageElement | null>(null)
+  const frontImageRef = useRef<HTMLImageElement | null>(null)
+  const backImageRef = useRef<HTMLImageElement | null>(null)
+  const signatureImageRef = useRef<HTMLImageElement | null>(null)
 
-  // Mobile-specific throttling
+  // Mobile check
   const isMobileRef = useRef(false)
-  const lastMobileUpdateRef = useRef(0)
-  const mobileAnimationFrameRef = useRef<number | null>(null)
-  const pendingMobilePositionRef = useRef<{ x: number; y: number } | null>(null)
 
-  // Canvas dimensions based on actual ID card size (in pixels)
   const CANVAS_WIDTH = 1050
   const CANVAS_HEIGHT = 1650
 
-  // Detect if device is mobile
   useEffect(() => {
     const checkMobile = () => {
       isMobileRef.current =
@@ -126,7 +116,6 @@ export default function IdCanvas({
     if (!canvas) return { x: 0, y: 0 }
 
     const rect = canvas.getBoundingClientRect()
-    // Use the actual canvas dimensions for scaling
     const scaleX = CANVAS_WIDTH / rect.width
     const scaleY = CANVAS_HEIGHT / rect.height
 
@@ -136,18 +125,34 @@ export default function IdCanvas({
     }
   }, [])
 
-  const isPointInImage = useCallback(
+  // Check if click is inside the uploaded image or circular avatar aperture
+  const isPointInProfileImage = useCallback(
     (x: number, y: number) => {
       if (!uploadedImageUrl) return false
-      // Use logical coordinates, not scaled by DPR
-      return (
+      // In image bounding box
+      const inBox =
         x >= uploadedImagePosition.x &&
         x <= uploadedImagePosition.x + uploadedImageSize.width &&
         y >= uploadedImagePosition.y &&
         y <= uploadedImagePosition.y + uploadedImageSize.height
-      )
+      // OR in avatar aperture circle: center (518, 515), radius 260
+      const inCircle = Math.hypot(x - 518, y - 515) <= 260
+      return inBox || inCircle
     },
     [uploadedImageUrl, uploadedImagePosition, uploadedImageSize],
+  )
+
+  // Check if click is inside signature bounding box
+  const isPointInSignature = useCallback(
+    (x: number, y: number) => {
+      if (!signatureImageUrl) return false
+      const sigX = signaturePosition.x
+      const sigY = signaturePosition.y
+      const sigW = signatureSize.width
+      const sigH = signatureSize.height
+      return x >= sigX && x <= sigX + sigW && y >= sigY && y <= sigY + sigH
+    },
+    [signatureImageUrl, signaturePosition, signatureSize],
   )
 
   const isPointInCanvas = useCallback((clientX: number, clientY: number) => {
@@ -158,242 +163,235 @@ export default function IdCanvas({
     return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
   }, [])
 
-  // Mobile-optimized position update with throttling
-  const updatePositionMobile = useCallback(
-    (newPosition: { x: number; y: number }) => {
-      pendingMobilePositionRef.current = newPosition
-
-      if (mobileAnimationFrameRef.current) {
-        return // Already scheduled
-      }
-
-      mobileAnimationFrameRef.current = requestAnimationFrame(() => {
-        const now = Date.now()
-        if (now - lastMobileUpdateRef.current >= 32) {
-          // ~30fps for mobile
-          if (pendingMobilePositionRef.current && onImagePositionChange) {
-            onImagePositionChange(pendingMobilePositionRef.current)
-            lastMobileUpdateRef.current = now
-          }
-        }
-        mobileAnimationFrameRef.current = null
-      })
-    },
-    [onImagePositionChange],
-  )
-
-  // Desktop position update (immediate)
-  const updatePositionDesktop = useCallback(
-    (newPosition: { x: number; y: number }) => {
-      if (onImagePositionChange) {
-        onImagePositionChange(newPosition)
-      }
-    },
-    [onImagePositionChange],
-  )
-
-  // Mouse event handlers (Desktop)
   const handleMouseDown = useCallback(
     (e: MouseEvent) => {
-      if (!uploadedImageUrl) return
-
       const coords = getCanvasCoordinates(e.clientX, e.clientY)
 
-      if (isPointInImage(coords.x, coords.y)) {
-        setIsDragging(true)
-        onImageSelectedChange(true)
-        setDragOffset({
-          x: coords.x - uploadedImagePosition.x,
-          y: coords.y - uploadedImagePosition.y,
-        })
-        e.preventDefault()
-      } else if (isPointInCanvas(e.clientX, e.clientY)) {
-        // Only deselect if clicking inside canvas but outside image
-        onImageSelectedChange(false)
+      if (isFront) {
+        if (uploadedImageUrl && isPointInProfileImage(coords.x, coords.y)) {
+          setIsDragging(true)
+          dragTargetRef.current = "profile"
+          onImageSelectedChange(true)
+          setDragOffset({
+            x: coords.x - uploadedImagePosition.x,
+            y: coords.y - uploadedImagePosition.y,
+          })
+          e.preventDefault()
+        } else if (isPointInCanvas(e.clientX, e.clientY)) {
+          onImageSelectedChange(false)
+        }
+      } else {
+        if (signatureImageUrl && isPointInSignature(coords.x, coords.y)) {
+          setIsDragging(true)
+          dragTargetRef.current = "signature"
+          onSignatureSelectedChange?.(true)
+          setDragOffset({
+            x: coords.x - signaturePosition.x,
+            y: coords.y - signaturePosition.y,
+          })
+          e.preventDefault()
+        } else if (isPointInCanvas(e.clientX, e.clientY)) {
+          onSignatureSelectedChange?.(false)
+        }
       }
     },
     [
+      isFront,
       uploadedImageUrl,
+      signatureImageUrl,
       getCanvasCoordinates,
-      isPointInImage,
+      isPointInProfileImage,
+      isPointInSignature,
       isPointInCanvas,
       uploadedImagePosition,
+      signaturePosition,
       onImageSelectedChange,
+      onSignatureSelectedChange,
     ],
   )
 
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       const canvas = canvasRef.current
-      if (!canvas || !uploadedImageUrl) return
+      if (!canvas) return
 
       const coords = getCanvasCoordinates(e.clientX, e.clientY)
 
-      if (isPointInImage(coords.x, coords.y)) {
-        canvas.style.cursor = "move"
+      if (isFront) {
+        if (uploadedImageUrl && isPointInProfileImage(coords.x, coords.y)) {
+          canvas.style.cursor = isDragging ? "grabbing" : "grab"
+        } else {
+          canvas.style.cursor = "default"
+        }
       } else {
-        canvas.style.cursor = "default"
+        if (signatureImageUrl && isPointInSignature(coords.x, coords.y)) {
+          canvas.style.cursor = isDragging ? "grabbing" : "grab"
+        } else {
+          canvas.style.cursor = "default"
+        }
       }
 
       if (isDragging) {
-        const newPosition = {
-          x: coords.x - dragOffset.x,
-          y: coords.y - dragOffset.y,
+        if (dragTargetRef.current === "profile" && onImagePositionChange) {
+          const newPosition = {
+            x: Math.round(coords.x - dragOffset.x),
+            y: Math.round(coords.y - dragOffset.y),
+          }
+          onImagePositionChange(newPosition)
+        } else if (dragTargetRef.current === "signature" && onSignaturePositionChange) {
+          const newPosition = {
+            x: Math.round(coords.x - dragOffset.x),
+            y: Math.round(coords.y - dragOffset.y),
+          }
+          onSignaturePositionChange(newPosition)
         }
-        // Desktop gets immediate updates
-        updatePositionDesktop(newPosition)
       }
     },
-    [uploadedImageUrl, getCanvasCoordinates, isPointInImage, isDragging, dragOffset, updatePositionDesktop],
+    [
+      isFront,
+      uploadedImageUrl,
+      signatureImageUrl,
+      getCanvasCoordinates,
+      isPointInProfileImage,
+      isPointInSignature,
+      isDragging,
+      dragOffset,
+      onImagePositionChange,
+      onSignaturePositionChange,
+    ],
   )
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false)
+    dragTargetRef.current = null
   }, [])
 
-  // Touch event handlers (Mobile) - improved
   const handleTouchStart = useCallback(
     (e: TouchEvent) => {
-      if (!uploadedImageUrl || e.touches.length !== 1) return
-
+      if (e.touches.length !== 1) return
       const touch = e.touches[0]
       const coords = getCanvasCoordinates(touch.clientX, touch.clientY)
 
-      console.log("Touch start:", {
-        touchCoords: { x: touch.clientX, y: touch.clientY },
-        canvasCoords: coords,
-        imagePos: uploadedImagePosition,
-        imageSize: uploadedImageSize,
-        isInImage: isPointInImage(coords.x, coords.y),
-        isInCanvas: isPointInCanvas(touch.clientX, touch.clientY),
-      })
-
-      if (isPointInImage(coords.x, coords.y)) {
-        setIsDragging(true)
-        onImageSelectedChange(true)
-        setDragOffset({
-          x: coords.x - uploadedImagePosition.x,
-          y: coords.y - uploadedImagePosition.y,
-        })
-        e.preventDefault()
-        e.stopPropagation()
-      } else if (isPointInCanvas(touch.clientX, touch.clientY)) {
-        // Only deselect if touching inside canvas but outside image
-        onImageSelectedChange(false)
-        e.preventDefault()
+      if (isFront) {
+        if (uploadedImageUrl && isPointInProfileImage(coords.x, coords.y)) {
+          setIsDragging(true)
+          dragTargetRef.current = "profile"
+          onImageSelectedChange(true)
+          setDragOffset({
+            x: coords.x - uploadedImagePosition.x,
+            y: coords.y - uploadedImagePosition.y,
+          })
+          e.preventDefault()
+          e.stopPropagation()
+        } else if (isPointInCanvas(touch.clientX, touch.clientY)) {
+          onImageSelectedChange(false)
+        }
+      } else {
+        if (signatureImageUrl && isPointInSignature(coords.x, coords.y)) {
+          setIsDragging(true)
+          dragTargetRef.current = "signature"
+          onSignatureSelectedChange?.(true)
+          setDragOffset({
+            x: coords.x - signaturePosition.x,
+            y: coords.y - signaturePosition.y,
+          })
+          e.preventDefault()
+          e.stopPropagation()
+        } else if (isPointInCanvas(touch.clientX, touch.clientY)) {
+          onSignatureSelectedChange?.(false)
+        }
       }
     },
     [
+      isFront,
       uploadedImageUrl,
+      signatureImageUrl,
       getCanvasCoordinates,
-      isPointInImage,
+      isPointInProfileImage,
+      isPointInSignature,
       isPointInCanvas,
       uploadedImagePosition,
+      signaturePosition,
       onImageSelectedChange,
+      onSignatureSelectedChange,
     ],
   )
 
   const handleTouchMove = useCallback(
     (e: TouchEvent) => {
-      if (!uploadedImageUrl || !isDragging || e.touches.length !== 1) return
+      if (!isDragging || e.touches.length !== 1) return
 
       const touch = e.touches[0]
       const coords = getCanvasCoordinates(touch.clientX, touch.clientY)
 
-      const newPosition = {
-        x: coords.x - dragOffset.x,
-        y: coords.y - dragOffset.y,
+      if (dragTargetRef.current === "profile" && onImagePositionChange) {
+        const newPosition = {
+          x: Math.round(coords.x - dragOffset.x),
+          y: Math.round(coords.y - dragOffset.y),
+        }
+        onImagePositionChange(newPosition)
+      } else if (dragTargetRef.current === "signature" && onSignaturePositionChange) {
+        const newPosition = {
+          x: Math.round(coords.x - dragOffset.x),
+          y: Math.round(coords.y - dragOffset.y),
+        }
+        onSignaturePositionChange(newPosition)
       }
 
-      console.log("Touch move:", {
-        touchCoords: { x: touch.clientX, y: touch.clientY },
-        canvasCoords: coords,
-        newPosition,
-        dragOffset,
-      })
-
-      // Mobile gets throttled updates
-      updatePositionMobile(newPosition)
       e.preventDefault()
       e.stopPropagation()
     },
-    [uploadedImageUrl, isDragging, getCanvasCoordinates, dragOffset, updatePositionMobile],
+    [isDragging, getCanvasCoordinates, dragOffset, onImagePositionChange, onSignaturePositionChange],
   )
 
-  const handleTouchEnd = useCallback(
-    (e: TouchEvent) => {
-      console.log("Touch end, was dragging:", isDragging)
-      setIsDragging(false)
-      e.preventDefault()
-    },
-    [isDragging],
-  )
+  const handleTouchEnd = useCallback(() => {
+    setIsDragging(false)
+    dragTargetRef.current = null
+  }, [])
 
-  // Global click handler to handle clicks outside canvas
   const handleGlobalClick = useCallback(
-    (e: MouseEvent | TouchEvent) => {
-      const canvas = canvasRef.current
-      const container = containerRef.current
-      if (!canvas || !container) return
-
-      const target = e.target as Element
-
-      // Check if the click/touch is outside the entire canvas container
-      if (!container.contains(target)) {
-        onImageSelectedChange(false)
+    (e: MouseEvent) => {
+      if (isPointInCanvas(e.clientX, e.clientY)) {
+        return
       }
+      const target = e.target as HTMLElement
+      if (target.closest(".id-settings") || target.closest("button") || target.closest("input")) {
+        return
+      }
+      onImageSelectedChange(false)
+      onSignatureSelectedChange?.(false)
     },
-    [onImageSelectedChange],
+    [isPointInCanvas, onImageSelectedChange, onSignatureSelectedChange],
   )
 
-  // Event listeners setup
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    // Mouse events (Desktop)
     const mouseDownHandler = (e: MouseEvent) => handleMouseDown(e)
     const mouseMoveHandler = (e: MouseEvent) => handleMouseMove(e)
     const mouseUpHandler = () => handleMouseUp()
-
-    // Touch events (Mobile)
     const touchStartHandler = (e: TouchEvent) => handleTouchStart(e)
     const touchMoveHandler = (e: TouchEvent) => handleTouchMove(e)
-    const touchEndHandler = (e: TouchEvent) => handleTouchEnd(e)
-
-    // Global click/touch handlers
+    const touchEndHandler = () => handleTouchEnd()
     const globalClickHandler = (e: MouseEvent) => handleGlobalClick(e)
-    const globalTouchHandler = (e: TouchEvent) => handleGlobalClick(e)
 
-    // Add canvas-specific event listeners
     canvas.addEventListener("mousedown", mouseDownHandler)
+    document.addEventListener("mousemove", mouseMoveHandler)
+    document.addEventListener("mouseup", mouseUpHandler)
     canvas.addEventListener("touchstart", touchStartHandler, { passive: false })
     canvas.addEventListener("touchmove", touchMoveHandler, { passive: false })
     canvas.addEventListener("touchend", touchEndHandler, { passive: false })
-
-    // Add document-level event listeners
-    document.addEventListener("mousemove", mouseMoveHandler)
-    document.addEventListener("mouseup", mouseUpHandler)
-    document.addEventListener("click", globalClickHandler, true) // Use capture phase
-    document.addEventListener("touchend", globalTouchHandler, true) // Use capture phase
+    document.addEventListener("click", globalClickHandler, true)
 
     return () => {
-      // Clean up mobile animation frame
-      if (mobileAnimationFrameRef.current) {
-        cancelAnimationFrame(mobileAnimationFrameRef.current)
-      }
-
-      // Remove canvas event listeners
       canvas.removeEventListener("mousedown", mouseDownHandler)
+      document.removeEventListener("mousemove", mouseMoveHandler)
+      document.removeEventListener("mouseup", mouseUpHandler)
       canvas.removeEventListener("touchstart", touchStartHandler)
       canvas.removeEventListener("touchmove", touchMoveHandler)
       canvas.removeEventListener("touchend", touchEndHandler)
-
-      // Remove document event listeners
-      document.removeEventListener("mousemove", mouseMoveHandler)
-      document.removeEventListener("mouseup", mouseUpHandler)
       document.removeEventListener("click", globalClickHandler, true)
-      document.removeEventListener("touchend", globalTouchHandler, true)
     }
   }, [
     handleMouseDown,
@@ -427,25 +425,20 @@ export default function IdCanvas({
     setQrCanvas(canvas)
   }, [])
 
-  // Optimized image loading with caching
   const loadImages = useCallback(async () => {
     const promises: Promise<void>[] = []
 
-    // Load uploaded image if needed
     if (uploadedImageUrl && (!uploadedImageRef.current || uploadedImageRef.current.src !== uploadedImageUrl)) {
       const uploadedImgPromise = new Promise<void>((resolve) => {
         const img = new window.Image()
-        img.crossOrigin = "anonymous"
+        if (!uploadedImageUrl.startsWith("data:") && !uploadedImageUrl.startsWith("blob:")) {
+          img.crossOrigin = "anonymous"
+        }
         img.onload = () => {
           uploadedImageRef.current = img
-          if (!imageEntry.originalPhotoSize) {
-            setImageEntry((prev) => ({
-              ...prev,
-              originalPhotoSize: {
-                width: img.naturalWidth,
-                height: img.naturalHeight,
-              },
-            }))
+          originalPhotoSizeRef.current = {
+            width: img.naturalWidth,
+            height: img.naturalHeight,
           }
           resolve()
         }
@@ -457,31 +450,63 @@ export default function IdCanvas({
         img.src = uploadedImageUrl
       })
       promises.push(uploadedImgPromise)
+    } else if (!uploadedImageUrl) {
+      uploadedImageRef.current = null
     }
 
-    // Load ID background if needed
-    const idImageSrc = isFront ? "/images/front-id.png" : "/images/back-id.png"
-    if (!idImageRef.current || idImageRef.current.src.includes(idImageSrc) === false) {
-      const idImgPromise = new Promise<void>((resolve, reject) => {
+    if (signatureImageUrl && (!signatureImageRef.current || signatureImageRef.current.src !== signatureImageUrl)) {
+      const sigPromise = new Promise<void>((resolve) => {
         const img = new window.Image()
-        img.crossOrigin = "anonymous"
+        if (!signatureImageUrl.startsWith("data:") && !signatureImageUrl.startsWith("blob:")) {
+          img.crossOrigin = "anonymous"
+        }
         img.onload = () => {
-          idImageRef.current = img
+          signatureImageRef.current = img
           resolve()
         }
         img.onerror = () => {
-          console.error("Failed to load ID background image")
-          reject()
+          console.error("Failed to load signature image")
+          signatureImageRef.current = null
+          resolve()
         }
-        img.src = idImageSrc
+        img.src = signatureImageUrl
       })
-      promises.push(idImgPromise)
+      promises.push(sigPromise)
+    } else if (!signatureImageUrl) {
+      signatureImageRef.current = null
+    }
+
+    if (!frontImageRef.current) {
+      const frontPromise = new Promise<void>((resolve) => {
+        const img = new window.Image()
+        img.crossOrigin = "anonymous"
+        img.onload = () => {
+          frontImageRef.current = img
+          resolve()
+        }
+        img.onerror = () => resolve()
+        img.src = "/images/front-id.png"
+      })
+      promises.push(frontPromise)
+    }
+
+    if (!backImageRef.current) {
+      const backPromise = new Promise<void>((resolve) => {
+        const img = new window.Image()
+        img.crossOrigin = "anonymous"
+        img.onload = () => {
+          backImageRef.current = img
+          resolve()
+        }
+        img.onerror = () => resolve()
+        img.src = "/images/back-id.png"
+      })
+      promises.push(backPromise)
     }
 
     await Promise.all(promises)
-  }, [uploadedImageUrl, isFront, imageEntry.originalPhotoSize])
+  }, [uploadedImageUrl, signatureImageUrl])
 
-  // Fixed canvas drawing with proper responsive sizing
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -489,25 +514,12 @@ export default function IdCanvas({
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    const dpr = window.devicePixelRatio || 1
-    dprRef.current = dpr
-    const rect = canvas.getBoundingClientRect()
+    const dpr = dprRef.current || 1
 
-    // Set canvas internal size with device pixel ratio for crisp rendering
-    canvas.width = CANVAS_WIDTH * dpr
-    canvas.height = CANVAS_HEIGHT * dpr
-
-    // Set canvas display size to maintain responsive behavior
-    canvas.style.width = `${rect.width}px`
-    canvas.style.height = `${rect.height}px`
-
-    // Scale the drawing context to match the device pixel ratio
-    ctx.scale(dpr, dpr)
-
-    // Clear the canvas
+    ctx.save()
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
 
-    // Draw uploaded image BEHIND the background (if available and cached)
     if (uploadedImageRef.current && isFront) {
       ctx.drawImage(
         uploadedImageRef.current,
@@ -518,14 +530,12 @@ export default function IdCanvas({
       )
     }
 
-    // Draw ID background on top (if cached)
-    if (idImageRef.current) {
-      ctx.drawImage(idImageRef.current, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+    const bgImage = isFront ? frontImageRef.current : backImageRef.current
+    if (bgImage) {
+      ctx.drawImage(bgImage, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
     }
 
-    // If showing front, draw text elements on top
     if (isFront) {
-      // Draw name
       const baseNameFontSize = Number.parseInt(nameFont)
       const fittingNameFontSize = getFittingFontSize(ctx, editableName, nameWidth, baseNameFontSize, true)
       ctx.font = `bold ${fittingNameFontSize}px Arial`
@@ -533,21 +543,18 @@ export default function IdCanvas({
       ctx.textAlign = nameAlign
       ctx.fillText(editableName, namePosition.x, namePosition.y)
 
-      // Draw member ID
       const baseMemberIdFontSize = Number.parseInt(memberIdFont)
       ctx.font = `bold ${baseMemberIdFontSize}px Arial`
       ctx.fillStyle = "#003b64"
       ctx.textAlign = "left"
       ctx.fillText(memberData.memberid.toString(), memberIdPosition.x, memberIdPosition.y)
 
-      // Draw QR Code if available
       if (qrCanvas) {
         ctx.drawImage(qrCanvas, qrCodePosition.x, qrCodePosition.y, qrCodeSize.width, qrCodeSize.height)
       }
 
-      // Draw selection border around image if selected
       if (uploadedImageRef.current && isImageSelected) {
-        ctx.strokeStyle = "#007bff"
+        ctx.strokeStyle = "#dc2626"
         ctx.lineWidth = 2
         ctx.setLineDash([5, 5])
         ctx.strokeRect(
@@ -559,13 +566,38 @@ export default function IdCanvas({
         ctx.setLineDash([])
       }
     } else {
-      // Back ID - draw expiry date
       const baseExpiryFontSize = Number.parseInt(expiryFont)
       ctx.font = `bold ${baseExpiryFontSize}px Arial`
       ctx.fillStyle = "#003b64"
       ctx.textAlign = "left"
       ctx.fillText(expiryDate, expiryPosition.x, expiryPosition.y)
+
+      // Draw signature on back of card
+      if (signatureImageRef.current) {
+        ctx.drawImage(
+          signatureImageRef.current,
+          signaturePosition.x,
+          signaturePosition.y,
+          signatureSize.width,
+          signatureSize.height,
+        )
+
+        if (isSignatureSelected) {
+          ctx.strokeStyle = "#dc2626"
+          ctx.lineWidth = 2
+          ctx.setLineDash([5, 5])
+          ctx.strokeRect(
+            signaturePosition.x,
+            signaturePosition.y,
+            signatureSize.width,
+            signatureSize.height,
+          )
+          ctx.setLineDash([])
+        }
+      }
     }
+
+    ctx.restore()
   }, [
     memberData,
     isFront,
@@ -575,6 +607,7 @@ export default function IdCanvas({
     nameAlign,
     memberIdPosition,
     memberIdFont,
+    uploadedImageUrl,
     uploadedImagePosition,
     uploadedImageSize,
     editableName,
@@ -585,31 +618,54 @@ export default function IdCanvas({
     qrCanvas,
     qrCodePosition,
     qrCodeSize,
+    signatureImageUrl,
+    signaturePosition,
+    signatureSize,
+    isSignatureSelected,
   ])
 
-  // Main effect for loading and drawing
+  // Set internal canvas resolution once on mount
   useEffect(() => {
-    const loadAndDraw = async () => {
-      setIsLoading(true)
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const dpr = window.devicePixelRatio || 1
+    dprRef.current = dpr
+    canvas.width = CANVAS_WIDTH * dpr
+    canvas.height = CANVAS_HEIGHT * dpr
+  }, [])
+
+  // Asset loading when URL or side changes
+  useEffect(() => {
+    let isMounted = true
+    const initImages = async () => {
       try {
         await loadImages()
-        drawCanvas()
+        if (isMounted) {
+          setIsLoading(false)
+          drawCanvas()
+        }
       } catch (error) {
-        console.error("Error rendering ID:", error)
-      } finally {
-        setIsLoading(false)
+        console.error("Error loading images:", error)
+        if (isMounted) {
+          setIsLoading(false)
+          drawCanvas()
+        }
       }
     }
 
-    loadAndDraw()
+    initImages()
+    return () => {
+      isMounted = false
+    }
   }, [loadImages, drawCanvas])
 
-  // Separate effect for position changes during dragging (no loading state)
+  // Fast redraw whenever visual properties change
   useEffect(() => {
-    if (!isLoading && (uploadedImageRef.current || idImageRef.current)) {
+    if (!isLoading) {
       drawCanvas()
     }
-  }, [uploadedImagePosition, drawCanvas, isLoading])
+  }, [drawCanvas, isLoading])
 
   const qrCodeContent = memberData.email ? `https://leuteriorealty.com/business-card?email=${memberData.email}` : ""
 
@@ -619,23 +675,20 @@ export default function IdCanvas({
         ref={canvasRef}
         width={CANVAS_WIDTH}
         height={CANVAS_HEIGHT}
-        className="w-full h-auto rounded-lg shadow-lg border touch-none select-none"
+        className="w-full h-auto rounded-xl shadow-lg border border-slate-200 touch-none select-none bg-white"
         style={{
           maxWidth: "100%",
           height: "auto",
-          // Optimize for mobile performance during dragging
-          willChange: isDragging && isMobileRef.current ? "transform" : "auto",
         }}
       />
 
-      {/* QR Code Renderer - hidden but generates the QR code canvas */}
       {isFront && qrCodeContent && (
         <QRCodeRenderer
           value={qrCodeContent}
           size={qrCodeSize.width}
           fgColor="#003b64"
           bgColor="#FFFFFF00"
-          qrStyle={qrCodeModuleShape}
+          qrStyle={qrCodeModuleShape === "square" ? "squares" : qrCodeModuleShape}
           eyeShape={qrCodeEyeShape}
           cornerRadius={qrCodeCornerRadius}
           errorCorrectionLevel={qrCodeErrorCorrection}
@@ -646,27 +699,20 @@ export default function IdCanvas({
       )}
 
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
-          <div className="w-12 h-12">
-            <svg
-              className="animate-spin w-full h-full text-white"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 714 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-          </div>
+        <div className="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-sm rounded-xl">
+          <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
-      {uploadedImageUrl && isImageSelected && (
-        <div className="absolute top-2 right-2 bg-blue-600 bg-opacity-90 text-white text-xs px-2 py-1 rounded">
-          Drag to move • Touch to move on mobile • Click outside to deselect
+
+      {isFront && uploadedImageUrl && isImageSelected && (
+        <div className="absolute top-2 right-2 bg-[#003b64] text-white text-[11px] px-2.5 py-1 rounded-lg shadow-md font-medium">
+          Drag to move photo • Click outside to deselect
+        </div>
+      )}
+
+      {!isFront && signatureImageUrl && isSignatureSelected && (
+        <div className="absolute top-2 right-2 bg-[#003b64] text-white text-[11px] px-2.5 py-1 rounded-lg shadow-md font-medium">
+          Drag to move signature • Click outside to deselect
         </div>
       )}
     </div>

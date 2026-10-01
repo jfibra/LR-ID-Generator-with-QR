@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
-  const id = params.id
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
 
   console.log(`Server: Fetching member data for ID: ${id}`)
 

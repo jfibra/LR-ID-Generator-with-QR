@@ -8,7 +8,7 @@ interface QRCodeRendererProps {
   size: number
   bgColor?: string
   fgColor?: string
-  qrStyle?: "squares" | "dots" | "fluid"
+  qrStyle?: "squares" | "dots" | "fluid" | "square"
   eyeShape?: "square" | "circle" // Use eyeShape directly
   cornerRadius?: number // Use cornerRadius for eyeRadius when eyeShape is circle
   errorCorrectionLevel?: "L" | "M" | "Q" | "H"
@@ -61,7 +61,7 @@ export default function QRCodeRenderer({
         size={size}
         bgColor={bgColor}
         fgColor={fgColor}
-        qrStyle={qrStyle}
+        qrStyle={qrStyle === "square" ? "squares" : qrStyle}
         // Pass calculatedEyeRadius directly to eyeRadius prop
         eyeRadius={calculatedEyeRadius}
         ecLevel={errorCorrectionLevel}

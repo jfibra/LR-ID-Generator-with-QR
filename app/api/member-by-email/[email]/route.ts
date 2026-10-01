@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 
-export async function GET(request: Request, { params }: { params: { email: string } }) {
-  const email = decodeURIComponent(params.email)
+export async function GET(request: Request, { params }: { params: Promise<{ email: string }> }) {
+  const { email: rawEmail } = await params
+  const email = decodeURIComponent(rawEmail)
 
   console.log(`Server: Fetching member data for email: ${email}`)
 
