@@ -8,6 +8,7 @@ import IdSettings from "@/components/id-settings"
 import type { IdSettings as IdSettingsType } from "@/components/id-settings"
 import IdCanvas from "@/components/id-canvas"
 import QRCodeRenderer from "@/components/qr-code-renderer"
+import { Maximize2, PenTool } from "lucide-react"
 
 export default function IdGenerator() {
   const router = useRouter()
@@ -19,6 +20,7 @@ export default function IdGenerator() {
   const [isImageSelected, setIsImageSelected] = useState(false)
   const [isSignatureSelected, setIsSignatureSelected] = useState(false)
   const [isFront, setIsFront] = useState(true)
+  const [modalToOpen, setModalToOpen] = useState<"photo" | "signature" | null>(null)
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   const hasLoggedAccessRef = useRef(false)
 
@@ -509,6 +511,8 @@ export default function IdGenerator() {
               onSignatureUpload={handleSignatureUpload}
               signaturePosition={settings.signaturePosition}
               onSignaturePositionChange={handleSignaturePositionChange}
+              initialOpenModal={modalToOpen}
+              onCloseInitialModal={() => setModalToOpen(null)}
             />
 
             {/* Mobile quick view preview button */}
@@ -621,8 +625,44 @@ export default function IdGenerator() {
                   </div>
                 </div>
 
+                {/* Mobile Quick Touch Expand Action Bar (Visible on mobile screens) */}
+                <div className="md:hidden flex items-center gap-2 w-full max-w-[340px] mt-3">
+                  {isFront ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileTab("settings")
+                        setModalToOpen("photo")
+                      }}
+                      className="flex-1 py-2 px-3 bg-blue-50 hover:bg-blue-100 text-[#003b64] border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    >
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      <span>Touch Expand Photo</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileTab("settings")
+                        setModalToOpen("signature")
+                      }}
+                      className="flex-1 py-2 px-3 bg-blue-50 hover:bg-blue-100 text-[#003b64] border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    >
+                      <PenTool className="w-3.5 h-3.5" />
+                      <span>Touch Expand Signature</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsFront((prev) => !prev)}
+                    className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
+                  >
+                    <span>Flip to {isFront ? "Back" : "Front"}</span>
+                  </button>
+                </div>
+
                 {/* Unified Sequential Download Button & Controls */}
-                <div className="flex flex-col items-center gap-3 w-full max-w-[340px] sm:max-w-[360px] mt-5">
+                <div className="flex flex-col items-center gap-3 w-full max-w-[340px] sm:max-w-[360px] mt-4 sm:mt-5">
                   <button
                     type="button"
                     onClick={handleDownloadButtonClick}
